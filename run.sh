@@ -25,12 +25,13 @@ if [ "$MODE" == "1" ] || [ "$MODE" == "web" ]; then
     echo "Đang khởi động Web Dashboard (tự động chọn port trống nếu port $PORT bận)..."
     $PYTHON_BIN web_app.py --port "$PORT" --auto-port
 elif [ "$MODE" == "2" ] || [ "$MODE" == "desktop" ]; then
-    echo "Đang khởi động Desktop HUD với Camera máy tính..."
-    $PYTHON_BIN main_cli.py
+    SOURCE="${2:-0}"
+    echo "Đang khởi động Desktop HUD với Camera nguồn: $SOURCE..."
+    $PYTHON_BIN main_cli.py --source "$SOURCE"
 elif [ "$MODE" == "3" ] || [ "$MODE" == "test" ]; then
     $PYTHON_BIN test_sample.py
 elif [ "$MODE" == "4" ] || [ "$MODE" == "demo" ]; then
     $PYTHON_BIN demo_inference.py
 else
-    echo "Lựa chọn không hợp lệ. Sử dụng: ./run.sh [1|2|3|4] [port]"
+    echo "Lựa chọn không hợp lệ. Sử dụng: ./run.sh [1|2|3|4] [port/source]"
 fi
