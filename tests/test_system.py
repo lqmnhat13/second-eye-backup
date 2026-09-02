@@ -139,10 +139,34 @@ def run_tests():
     assert detect_json["status"] == "success"
     print(f"  -> POST /api/detect_frame status: 200 OK | Latency: {detect_json['inference_ms']}ms | FPS: {detect_json['fps']}")
 
+    # 6. Test OCR Document & Text Reader
+    print("\n[Test 6/6] Verifying OCR Document & Label Reader...")
+    from src.core.ocr_reader import ocr_reader
+    
+    # Create test document image with printed text
+    doc_frame = np.ones((300, 600, 3), dtype=np.uint8) * 255
+    cv2.putText(doc_frame, "SECOND EYE VIETNAM", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2, cv2.LINE_AA)
+    cv2.putText(doc_frame, "TRO LY THI GIAC", (50, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 2, cv2.LINE_AA)
+
+    ocr_res = ocr_reader.extract_text(doc_frame)
+    print(f"  -> OCR Extracted: \"{ocr_res.full_text}\" (Word count: {ocr_res.word_count})")
+    assert ocr_res.word_count >= 2, "Expected at least 2 words recognized from test document image"
+
+    # Test /api/ocr/read_frame endpoint
+    _, doc_buf = cv2.imencode('.jpg', doc_frame)
+    doc_b64 = "data:image/jpeg;base64," + base64.b64encode(doc_buf).decode('utf-8')
+    res_ocr = client.post("/api/ocr/read_frame", json={"image": doc_b64, "synthesize_audio": True})
+    assert res_ocr.status_code == 200
+    ocr_json = res_ocr.json()
+    assert ocr_json["status"] == "success"
+    assert "audio_paragraphs" in ocr_json
+    print(f"  -> POST /api/ocr/read_frame status: 200 OK | Audio Synthesized: {bool(ocr_json['full_audio_base64'])}")
+
     alert_mgr.stop()
     print("\n" + "=" * 60)
-    print("  ALL 5 SYSTEM TESTS PASSED PERFECTLY! 100% SUCCESS")
+    print("  ALL 6 SYSTEM & OCR TESTS PASSED PERFECTLY! 100% SUCCESS")
     print("=" * 60)
 
 if __name__ == "__main__":
     run_tests()
+

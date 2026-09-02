@@ -66,4 +66,21 @@ class VietnameseAudioService:
             print(f"[AudioService] gTTS generation error: {e}")
             return None
 
+    def synthesize_document_paragraphs(self, paragraphs: list) -> list:
+        """
+        Synthesize audio for each paragraph in a document for synchronized reading.
+        """
+        results = []
+        for p in paragraphs:
+            p_clean = p.strip()
+            if not p_clean:
+                continue
+            audio_b64 = self.get_audio_base64(p_clean)
+            results.append({
+                "text": p_clean,
+                "audio_base64": audio_b64
+            })
+        return results
+
 audio_service = VietnameseAudioService()
+

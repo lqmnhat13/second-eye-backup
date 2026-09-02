@@ -121,6 +121,21 @@ def main():
                 filename = str(outputs_dir / f"snapshot_{int(time.time())}.jpg")
                 cv2.imwrite(filename, annotated_frame)
                 print(f"[Saved] Đã lưu ảnh chụp: {filename}")
+            elif key == ord('t') or key == ord('T'):
+                print("\n[OCR] Đang quét và phân tích văn bản trong khung hình...")
+                from src.core.ocr_reader import ocr_reader
+                ocr_res = ocr_reader.extract_text(frame, render_annotated=True)
+                if ocr_res.full_text.strip():
+                    print(f"[OCR Thành Công] Nhận diện được {ocr_res.word_count} từ:")
+                    print("-" * 50)
+                    for idx, p in enumerate(ocr_res.paragraphs, 1):
+                        print(f"  {idx}. {p}")
+                    print("-" * 50)
+                    # Speak out loud
+                    alert_mgr._speak_local(ocr_res.full_text)
+                else:
+                    print("[OCR] Không tìm thấy văn bản rõ ràng trong khung hình.")
+                    alert_mgr._speak_local("Không tìm thấy văn bản rõ ràng.")
             elif key == ord('+') or key == ord('='):
                 current_focal += 25.0
                 detector.set_focal_length(current_focal)

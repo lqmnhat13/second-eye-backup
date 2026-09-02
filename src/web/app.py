@@ -28,6 +28,7 @@ from src.config import (
     SRC_DIR
 )
 from src.core.detector import IndoorDetector
+from src.core.ocr_reader import ocr_reader
 from src.services.alert_manager import AlertManager
 from src.services.audio_service import audio_service
 
@@ -36,7 +37,7 @@ WEB_DIR = SRC_DIR / "web"
 STATIC_DIR = WEB_DIR / "static"
 TEMPLATES_DIR = WEB_DIR / "templates"
 
-app = FastAPI(title="Second Eye - Vision Assistant API", version="2.0.0")
+app = FastAPI(title="Second Eye - Vision Assistant & Document Reader API", version="2.5.0")
 
 # Enable CORS for local network and mobile access
 app.add_middleware(
@@ -204,3 +205,113 @@ async def text_to_speech(text: str):
 async def get_alerts_log():
     """Fetch recent alert history."""
     return {"log": alert_manager.alert_log}
+
+class OCRRequest(BaseModel):
+    image: str  # Base64 encoded image
+    synthesize_audio: Optional[bool] = True
+
+@app.post("/api/ocr/read_frame")
+async def ocr_read_frame(payload: OCRRequest):
+    """
+    Perform high-accuracy OCR on camera frame and synthesize Vietnamese voice reading.
+    Returns extracted text, lines, paragraphs, audio base64 clips, and annotated image.
+    """
+    start_time = time.time()
+    try:
+        if "," in payload.image:
+            image_data = payload.image.split(",")[1]
+        else:
+            image_data = payload.image
+
+        image_bytes = base64.b64decode(image_data)
+        np_arr = np.frombuffer(image_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return JSONResponse({"status": "error", "message": "Invalid image format"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": f"Decode error: {str(e)}"}, status_code=400)
+
+    # Run OCR text extraction
+    ocr_res = ocr_reader.extract_text(frame, render_annotated=True)
+
+    # Synthesize audio for paragraphs
+    audio_paragraphs = []
+    full_audio_b64 = None
+    if payload.synthesize_audio and ocr_res.full_text:
+        # Full text audio
+        full_audio_b64 = audio_service.get_audio_base64(ocr_res.full_text)
+        # Paragraphs audio for synchronized highlighting
+        audio_paragraphs = audio_service.synthesize_document_paragraphs(ocr_res.paragraphs)
+
+    # Encode annotated image
+    annotated_b64 = None
+    if ocr_res.annotated_image is not None:
+        _, buffer = cv2.imencode('.jpg', ocr_res.annotated_image)
+        annotated_b64 = "data:image/jpeg;base64," + base64.b64encode(buffer).decode('utf-8')
+
+    latency_ms = round((time.time() - start_time) * 1000, 1)
+
+    return {
+        "status": "success",
+        "latency_ms": latency_ms,
+        "full_text": ocr_res.full_text,
+        "paragraphs": ocr_res.paragraphs,
+        "word_count": ocr_res.word_count,
+        "avg_confidence": round(ocr_res.avg_confidence, 2),
+        "lines": [
+            {
+                "text": l.text,
+                "confidence": round(l.confidence, 2),
+                "rect": list(l.rect),
+                "bbox": l.bbox
+            }
+            for l in ocr_res.lines
+        ],
+        "full_audio_base64": full_audio_b64,
+        "audio_paragraphs": audio_paragraphs,
+        "annotated_image": annotated_b64
+    }
+
+@app.post("/api/ocr/read_file")
+async def ocr_read_file(file: UploadFile = File(...), synthesize_audio: bool = Form(True)):
+    """Upload a document photo and extract & read text with Vietnamese voice."""
+    contents = await file.read()
+    np_arr = np.frombuffer(contents, np.uint8)
+    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+    if frame is None:
+        return JSONResponse({"status": "error", "message": "Failed to decode image file"}, status_code=400)
+
+    ocr_res = ocr_reader.extract_text(frame, render_annotated=True)
+
+    full_audio_b64 = None
+    audio_paragraphs = []
+    if synthesize_audio and ocr_res.full_text:
+        full_audio_b64 = audio_service.get_audio_base64(ocr_res.full_text)
+        audio_paragraphs = audio_service.synthesize_document_paragraphs(ocr_res.paragraphs)
+
+    annotated_b64 = None
+    if ocr_res.annotated_image is not None:
+        _, buffer = cv2.imencode('.jpg', ocr_res.annotated_image)
+        annotated_b64 = "data:image/jpeg;base64," + base64.b64encode(buffer).decode('utf-8')
+
+    return {
+        "status": "success",
+        "full_text": ocr_res.full_text,
+        "paragraphs": ocr_res.paragraphs,
+        "word_count": ocr_res.word_count,
+        "avg_confidence": round(ocr_res.avg_confidence, 2),
+        "lines": [
+            {
+                "text": l.text,
+                "confidence": round(l.confidence, 2),
+                "rect": list(l.rect),
+                "bbox": l.bbox
+            }
+            for l in ocr_res.lines
+        ],
+        "full_audio_base64": full_audio_b64,
+        "audio_paragraphs": audio_paragraphs,
+        "annotated_image": annotated_b64
+    }
+

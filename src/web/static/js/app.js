@@ -1,12 +1,16 @@
 /**
- * Second Eye - Frontend Engine (Webcam Stream, Web Speech API, AR HUD & 2D Radar)
+ * Second Eye - Frontend Engine
+ * Dual-Mode System:
+ *   1. Obstacle Detection & 2D Spatial Radar Mode
+ *   2. OCR Document & Label Reader Mode with Native Vietnamese Voice
  */
 
 document.addEventListener("DOMContentLoaded", () => {
-    // STATE
+    // SYSTEM STATE
     const state = {
+        mode: "nav", // "nav" (Obstacle/Radar) or "ocr" (Document Reader)
         isStreaming: false,
-        facingMode: "environment", // "user" or "environment" (rear camera preferred for navigation)
+        facingMode: "environment", // "user" or "environment" (rear camera)
         focalLength: 650,
         confidence: 0.35,
         voiceEnabled: true,
@@ -14,21 +18,44 @@ document.addEventListener("DOMContentLoaded", () => {
         dangerThreshold: 1.0,
         warningThreshold: 2.0,
         isProcessingFrame: false,
+        isReadingOCR: false,
         disabledClasses: new Set(),
         currentObjects: [],
         lastSpokenPhrase: "",
         lastAlertTime: 0,
         radarAngle: 0,
-        radarObjects: []
+        radarObjects: [],
+        
+        // OCR State
+        ocrResult: null,
+        ocrParagraphs: [],
+        ocrCurrentParaIdx: 0,
+        ocrIsPlaying: false,
+        ocrFontSize: 1.15
     };
 
-    // DOM ELEMENTS
+    // DOM ELEMENTS - CORE
     const video = document.getElementById("webcam-video");
     const hudCanvas = document.getElementById("hud-canvas");
     const hudCtx = hudCanvas.getContext("2d");
     const radarCanvas = document.getElementById("radar-canvas");
     const radarCtx = radarCanvas.getContext("2d");
 
+    // Mode Switcher Tabs
+    const tabModeNav = document.getElementById("tab-mode-nav");
+    const tabModeOcr = document.getElementById("tab-mode-ocr");
+    const panelViewTitle = document.getElementById("panel-view-title");
+    const panelViewSubtitle = document.getElementById("panel-view-subtitle");
+    const navZoneElements = document.querySelectorAll(".nav-zone-element");
+    const navLegendBar = document.getElementById("nav-legend-bar");
+    const navSideSection = document.getElementById("nav-side-section");
+    const ocrSideSection = document.getElementById("ocr-side-section");
+    const ocrViewfinderGuide = document.getElementById("ocr-viewfinder-guide");
+    const ocrActionBar = document.getElementById("ocr-action-bar");
+    const focalSettingItem = document.getElementById("focal-setting-item");
+    const confSettingItem = document.getElementById("conf-setting-item");
+
+    // Camera Controls
     const btnCameraToggle = document.getElementById("btn-camera-toggle");
     const btnStartHero = document.getElementById("btn-start-cam-hero");
     const btnSwitchCamera = document.getElementById("btn-switch-camera");
@@ -36,47 +63,65 @@ document.addEventListener("DOMContentLoaded", () => {
     const camBtnText = document.getElementById("cam-btn-text");
     const camPlaceholder = document.getElementById("cam-placeholder");
 
+    // Nav Stats & Banners
     const statFps = document.getElementById("stat-fps");
     const statLatency = document.getElementById("stat-latency");
     const streamStatusDot = document.getElementById("stream-status-dot");
     const streamStatusText = document.getElementById("stream-status-text");
-
     const activeBanner = document.getElementById("active-alert-banner");
     const alertTitle = document.getElementById("alert-title");
     const alertDesc = document.getElementById("alert-desc");
     const alertBadgeDist = document.getElementById("alert-badge-dist");
     const alertIconBox = document.getElementById("alert-icon-box");
 
+    // Voice & General Controls
     const btnToggleVoice = document.getElementById("btn-toggle-voice");
     const voiceIcon = document.getElementById("voice-icon");
     const srAnnouncer = document.getElementById("sr-announcer");
-
     const focalSlider = document.getElementById("focal-slider");
     const focalValDisplay = document.getElementById("focal-val-display");
     const confSlider = document.getElementById("conf-slider");
     const confValDisplay = document.getElementById("conf-val-display");
-    const speechRateSlider = document.getElementById("speech-rate-slider");
-    const speechRateDisplay = document.getElementById("speech-rate-display");
 
+    // Lists & Logs
     const objectsListContainer = document.getElementById("objects-list-container");
     const detectedCount = document.getElementById("detected-count");
     const alertsLogContainer = document.getElementById("alerts-log-container");
     const btnClearLog = document.getElementById("btn-clear-log");
 
+    // OCR Elements
+    const btnOcrSnap = document.getElementById("btn-ocr-snap");
+    const btnOcrPlayPause = document.getElementById("btn-ocr-play-pause");
+    const ocrPlayIcon = document.getElementById("ocr-play-icon");
+    const ocrPlayText = document.getElementById("ocr-play-text");
+    const btnOcrReplay = document.getElementById("btn-ocr-replay");
+    const ocrTextDisplay = document.getElementById("ocr-text-display");
+    const ocrStatusStrip = document.getElementById("ocr-status-strip");
+    const ocrStatusLabel = document.getElementById("ocr-status-label");
+    const ocrStatsBadge = document.getElementById("ocr-stats-badge");
+    const btnTextSmaller = document.getElementById("btn-text-smaller");
+    const btnTextLarger = document.getElementById("btn-text-larger");
+    const btnCopyOcr = document.getElementById("btn-copy-ocr");
+    const ocrSpeedSelect = document.getElementById("ocr-speed-select");
+    const btnClearOcr = document.getElementById("btn-clear-ocr");
+
+    // Modals
     const classesModal = document.getElementById("classes-modal");
     const btnOpenClassesModal = document.getElementById("btn-open-classes-modal");
     const btnCloseClassesModal = document.getElementById("btn-close-classes-modal");
     const btnSaveClasses = document.getElementById("btn-save-classes");
     const btnSelectAllClasses = document.getElementById("btn-select-all-classes");
-
     const shortcutsModal = document.getElementById("shortcuts-modal");
     const btnShortcuts = document.getElementById("btn-shortcuts");
     const btnCloseShortcutsModal = document.getElementById("btn-close-shortcuts-modal");
     const btnCloseShortcuts = document.getElementById("btn-close-shortcuts");
     const fileInput = document.getElementById("file-input");
 
-    // WEB AUDIO SYNTHESIZER (For instant danger beeps)
+    // AUDIO PLAYERS
     let audioCtx = null;
+    const alertAudio = new Audio();
+    const ocrAudio = new Audio();
+
     function playDangerBeep(freq = 880, duration = 0.15) {
         if (!state.voiceEnabled) return;
         try {
@@ -101,15 +146,12 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // NATIVE VIETNAMESE AUDIO PLAYER (100% PURE VIETNAMESE MP3)
     let isAudioPlaying = false;
     let lastAudioPlayTime = 0;
-    const alertAudio = new Audio();
 
     function playVietnameseAlert(alert) {
-        if (!state.voiceEnabled || !alert) return;
+        if (!state.voiceEnabled || !alert || state.mode !== "nav") return;
 
-        // Announce for Screen Readers
         if (srAnnouncer && alert.text_vi) {
             srAnnouncer.textContent = alert.text_vi;
         }
@@ -117,17 +159,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const isDanger = (alert.risk_level === "DANGER");
         const now = Date.now();
 
-        // Strict lock: if audio is currently playing, ignore new normal warnings
         if (isAudioPlaying) {
-            if (!isDanger) {
-                return; // Drop message, don't spam
-            } else {
-                // Emergency danger: interrupt current sound
-                alertAudio.pause();
-                alertAudio.currentTime = 0;
-            }
+            if (!isDanger) return;
+            alertAudio.pause();
+            alertAudio.currentTime = 0;
         } else if (!isDanger && (now - lastAudioPlayTime < 4500)) {
-            // Enforce minimum 4.5s of silence between voice alerts
             return;
         }
 
@@ -156,446 +192,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // Safe backwards-compatible wrapper
-    function speakVietnamese(text) {
-        playVietnameseText(text);
-    }
-
-    // CAMERA INITIALIZATION
-    async function startCamera() {
-        try {
-            // Unlock audio on initial user interaction (handles mobile autoplay policies)
-            if (audioCtx && audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-            alertAudio.load();
-
-            // Check browser MediaDevices API support (often blocked on non-localhost HTTP)
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
-                if (!isLocal && location.protocol !== "https:") {
-                    alert(
-                        "⚠️ TRÌNH DUYỆT YÊU CẦU HTTPS KHI DÙNG CAMERA TRÊN ĐIỆN THOẠI:\n\n" +
-                        "Trình duyệt di động (iOS Safari / Android Chrome) bắt buộc sử dụng HTTPS để cấp quyền camera.\n\n" +
-                        "👉 Cách khắc phục:\n" +
-                        "1. Truy cập bằng đường dẫn HTTPS: https://" + location.hostname + ":" + location.port + "\n" +
-                        "   (Sau đó bấm 'Nâng cao' / 'Advanced' -> 'Tiếp tục truy cập' / 'Proceed')\n" +
-                        "2. Hoặc nếu dùng trên máy tính: mở http://localhost:" + location.port
-                    );
-                    return;
-                } else {
-                    alert("Trình duyệt của bạn không hỗ trợ hoặc đang chặn MediaDevices API.");
-                    return;
-                }
-            }
-
-            let stream = null;
-            // First attempt: try requested facingMode with ideal constraint (non-strict so laptops won't fail)
-            try {
-                const constraints = {
-                    video: {
-                        facingMode: state.facingMode ? { ideal: state.facingMode } : undefined,
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    },
-                    audio: false
-                };
-                stream = await navigator.mediaDevices.getUserMedia(constraints);
-            } catch (constraintErr) {
-                console.warn("[Second Eye] Retrying with generic video constraints:", constraintErr);
-                // Fallback attempt: request any available video camera
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: true,
-                    audio: false
-                });
-            }
-
-            video.srcObject = stream;
-            
-            video.onloadedmetadata = () => {
-                resizeCanvases();
-            };
-
-            await video.play();
-
-            state.isStreaming = true;
-            camPlaceholder.style.display = "none";
-            camBtnIcon.textContent = "⏸";
-            camBtnText.textContent = "Tạm Dừng";
-            btnCameraToggle.classList.replace("btn-primary", "btn-secondary");
-            streamStatusDot.classList.add("dot-live");
-            streamStatusText.textContent = "Camera đang chạy";
-
-            playVietnameseText("Camera đã khởi động. Đang quét vật thể.");
-
-            resizeCanvases();
-            requestAnimationFrame(processFrameLoop);
-        } catch (err) {
-            console.error("Camera access error:", err);
-            let userMsg = "Không thể mở camera (" + (err.name || "Lỗi") + ").";
-            if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-                userMsg = "Trình duyệt chưa được cấp quyền Camera.\n\n👉 Vui lòng bấm vào biểu tượng Ổ khóa hoặc Cài đặt trang web trên thanh địa chỉ và chọn 'Cho phép' (Allow) Camera.";
-            } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-                userMsg = "Không tìm thấy thiết bị camera nào trên máy.";
-            } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
-                userMsg = "Camera đang bị một ứng dụng khác (FaceTime, Zoom, Meet, ...) sử dụng. Vui lòng đóng ứng dụng đó và thử lại.";
-            } else if (err.name === "OverconstrainedError") {
-                userMsg = "Độ phân giải hoặc chế độ camera không được hỗ trợ trên thiết bị này.";
-            }
-            alert(userMsg);
-        }
-    }
-
-    function stopCamera() {
-        if (video.srcObject) {
-            video.srcObject.getTracks().forEach(track => track.stop());
-            video.srcObject = null;
-        }
-        state.isStreaming = false;
-        camPlaceholder.style.display = "flex";
-        camBtnIcon.textContent = "▶";
-        camBtnText.textContent = "Bật Camera";
-        btnCameraToggle.classList.replace("btn-secondary", "btn-primary");
-        streamStatusDot.classList.remove("dot-live");
-        streamStatusText.textContent = "Camera đã dừng";
-        
-        // Clear canvases
-        hudCtx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
-        state.currentObjects = [];
-        updateObjectsList([]);
-        updateAlertBanner(null);
-    }
-
-    function toggleCamera() {
-        if (state.isStreaming) {
-            stopCamera();
-        } else {
-            startCamera();
-        }
-    }
-
-    async function switchCamera() {
-        state.facingMode = state.facingMode === "environment" ? "user" : "environment";
-        if (state.isStreaming) {
-            stopCamera();
-            await startCamera();
-        }
-    }
-
-    function resizeCanvases() {
-        const vw = video.videoWidth || 640;
-        const vh = video.videoHeight || 480;
-        hudCanvas.width = vw;
-        hudCanvas.height = vh;
-    }
-
-    // PROCESSING & INFERENCE LOOP
-    const offscreenCanvas = document.createElement("canvas");
-    const offCtx = offscreenCanvas.getContext("2d");
-
-    async function processFrameLoop() {
-        if (!state.isStreaming) return;
-
-        if (!state.isProcessingFrame && video.readyState >= video.HAVE_CURRENT_DATA) {
-            state.isProcessingFrame = true;
-
-            const t0 = performance.now();
-            const vw = video.videoWidth || 640;
-            const vh = video.videoHeight || 480;
-            offscreenCanvas.width = vw;
-            offscreenCanvas.height = vh;
-            offCtx.drawImage(video, 0, 0, vw, vh);
-
-            const base64Data = offscreenCanvas.toDataURL("image/jpeg", 0.65);
-
-            // Timeout controller (4000ms max per frame request)
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-            try {
-                const response = await fetch("/api/detect_frame", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        image: base64Data,
-                        focal_length: state.focalLength,
-                        conf_threshold: state.confidence
-                    }),
-                    signal: controller.signal
-                });
-
-                clearTimeout(timeoutId);
-
-                if (response.ok) {
-                    const data = await response.json();
-                    const t1 = performance.now();
-                    const latency = Math.round(t1 - t0);
-                    
-                    statLatency.textContent = `${latency}ms`;
-                    statFps.textContent = data.fps ? data.fps.toFixed(1) : "0.0";
-
-                    // Handle Detections & Rendering
-                    state.currentObjects = data.objects || [];
-                    state.radarObjects = state.currentObjects;
-
-                    drawHUD(state.currentObjects);
-                    updateObjectsList(state.currentObjects);
-                    handleAlerts(data.alerts || [], state.currentObjects);
-                }
-            } catch (err) {
-                if (err.name !== 'AbortError') {
-                    console.warn("Detection request error:", err);
-                }
-            } finally {
-                clearTimeout(timeoutId);
-                state.isProcessingFrame = false;
-            }
-        }
-
-        // Radar animation loop
-        renderRadar();
-
-        requestAnimationFrame(processFrameLoop);
-    }
-
-    // RENDER HUD AR ON CANVAS
-    function drawHUD(objects) {
-        hudCtx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
-
-        const w = hudCanvas.width;
-        const h = hudCanvas.height;
-
-        objects.forEach(obj => {
-            const [x1, y1, x2, y2] = obj.bbox;
-            const bw = x2 - x1;
-            const bh = y2 - y1;
-
-            let color = "#10b981"; // Safe Green
-            let glow = "rgba(16, 185, 129, 0.4)";
-            if (obj.risk_level === "DANGER") {
-                color = "#ef4444"; // Danger Red
-                glow = "rgba(239, 68, 68, 0.6)";
-            } else if (obj.risk_level === "WARNING") {
-                color = "#f59e0b"; // Warning Amber
-                glow = "rgba(245, 158, 11, 0.5)";
-            }
-
-            // Draw bounding box
-            hudCtx.save();
-            hudCtx.strokeStyle = color;
-            hudCtx.lineWidth = obj.risk_level === "DANGER" ? 3 : 2;
-            hudCtx.shadowColor = glow;
-            hudCtx.shadowBlur = 8;
-            hudCtx.strokeRect(x1, y1, bw, bh);
-
-            // Draw glowing corner brackets
-            const cLen = Math.min(20, bw / 4, bh / 4);
-            hudCtx.lineWidth = 4;
-            // Top-left
-            hudCtx.beginPath();
-            hudCtx.moveTo(x1, y1 + cLen);
-            hudCtx.lineTo(x1, y1);
-            hudCtx.lineTo(x1 + cLen, y1);
-            hudCtx.stroke();
-            // Bottom-right
-            hudCtx.beginPath();
-            hudCtx.moveTo(x2, y2 - cLen);
-            hudCtx.lineTo(x2, y2);
-            hudCtx.lineTo(x2 - cLen, y2);
-            hudCtx.stroke();
-
-            // Label text
-            const label = `${obj.name_vi.toUpperCase()} • ${obj.distance.toFixed(1)}m (${obj.direction_vi})`;
-            hudCtx.font = "bold 13px 'Outfit', sans-serif";
-            const textWidth = hudCtx.measureText(label).width;
-            
-            // Label tag background
-            hudCtx.fillStyle = color;
-            const tagY = Math.max(0, y1 - 22);
-            hudCtx.fillRect(x1, tagY, textWidth + 14, 22);
-
-            // Label text
-            hudCtx.fillStyle = obj.risk_level === "WARNING" ? "#000" : "#fff";
-            hudCtx.shadowBlur = 0;
-            hudCtx.fillText(label, x1 + 7, tagY + 16);
-
-            hudCtx.restore();
-        });
-    }
-
-    // RENDER 2D TOP-DOWN RADAR
-    function renderRadar() {
-        const rc = radarCtx;
-        const w = radarCanvas.width;
-        const h = radarCanvas.height;
-        const cx = w / 2;
-        const cy = h - 35; // User position near bottom
-        const maxRangeMeters = 4.0;
-        const maxRadiusPx = 110;
-
-        rc.clearRect(0, 0, w, h);
-
-        // Radar background glow
-        rc.save();
-
-        // Range rings (1m, 2m, 3m, 4m)
-        const rings = [1.0, 2.0, 3.0, 4.0];
-        rings.forEach(r => {
-            const rad = (r / maxRangeMeters) * maxRadiusPx;
-            rc.beginPath();
-            rc.arc(cx, cy, rad, Math.PI, 0); // Forward semicircle
-            rc.strokeStyle = r === 1.0 ? "rgba(239, 68, 68, 0.35)" : (r === 2.0 ? "rgba(245, 158, 11, 0.25)" : "rgba(0, 242, 254, 0.15)");
-            rc.lineWidth = 1;
-            rc.stroke();
-
-            // Distance labels
-            rc.fillStyle = "rgba(148, 163, 184, 0.6)";
-            rc.font = "9px 'JetBrains Mono', monospace";
-            rc.fillText(`${r.toFixed(0)}m`, cx + 4, cy - rad + 3);
-        });
-
-        // Direction sector lines (Left 35%, Center, Right 65%)
-        const angles = [-Math.PI * 0.75, -Math.PI * 0.5, -Math.PI * 0.25];
-        angles.forEach(ang => {
-            rc.beginPath();
-            rc.moveTo(cx, cy);
-            rc.lineTo(cx + Math.cos(ang) * maxRadiusPx, cy + Math.sin(ang) * maxRadiusPx);
-            rc.strokeStyle = "rgba(255, 255, 255, 0.08)";
-            rc.stroke();
-        });
-
-        // Animated sweeping beam
-        state.radarAngle += 0.04;
-        const sweepAngle = -Math.PI + (Math.sin(state.radarAngle) + 1) * 0.5 * Math.PI;
-        rc.beginPath();
-        rc.moveTo(cx, cy);
-        rc.arc(cx, cy, maxRadiusPx, sweepAngle - 0.2, sweepAngle);
-        rc.closePath();
-        const beamGrad = rc.createRadialGradient(cx, cy, 10, cx, cy, maxRadiusPx);
-        beamGrad.addColorStop(0, "rgba(0, 242, 254, 0.3)");
-        beamGrad.addColorStop(1, "rgba(0, 242, 254, 0.0)");
-        rc.fillStyle = beamGrad;
-        rc.fill();
-
-        // Render detected object blips
-        state.radarObjects.forEach(obj => {
-            const dist = Math.min(maxRangeMeters, obj.distance);
-            const distPx = (dist / maxRangeMeters) * maxRadiusPx;
-            
-            // Map lateral X [-1.5m to 1.5m] to angle
-            const latX = obj.coord_3d ? obj.coord_3d[0] : 0;
-            const objAngle = -Math.PI / 2 + (latX / 2.0);
-
-            const bx = cx + Math.cos(objAngle) * distPx;
-            const by = cy + Math.sin(objAngle) * distPx;
-
-            let bColor = "#10b981";
-            if (obj.risk_level === "DANGER") bColor = "#ef4444";
-            else if (obj.risk_level === "WARNING") bColor = "#f59e0b";
-
-            // Blip dot
-            rc.beginPath();
-            rc.arc(bx, by, obj.risk_level === "DANGER" ? 6 : 4, 0, Math.PI * 2);
-            rc.fillStyle = bColor;
-            rc.shadowColor = bColor;
-            rc.shadowBlur = 10;
-            rc.fill();
-
-            // Blip label
-            rc.fillStyle = "#fff";
-            rc.font = "bold 9px 'Outfit', sans-serif";
-            rc.fillText(obj.name_vi, bx + 7, by + 3);
-        });
-
-        rc.restore();
-    }
-
-    // UPDATE DETECTED OBJECTS SIDEBAR
-    function updateObjectsList(objects) {
-        detectedCount.textContent = `${objects.length} đối tượng`;
-
-        if (objects.length === 0) {
-            objectsListContainer.innerHTML = `<div class="empty-list-msg">Không có vật thể nào trong tầm nhìn</div>`;
-            return;
-        }
-
-        objectsListContainer.innerHTML = objects.map(obj => {
-            const riskCls = obj.risk_level.toLowerCase();
-            return `
-                <div class="object-item ${riskCls}">
-                    <div class="object-info">
-                        <span class="object-name">${obj.name_vi.toUpperCase()}</span>
-                        <span class="object-dir">${obj.direction_vi} • Độ tin cậy: ${Math.round(obj.confidence * 100)}%</span>
-                    </div>
-                    <div class="object-dist-badge">${obj.distance.toFixed(1)}m</div>
-                </div>
-            `;
-        }).join("");
-    }
-
-    // HANDLE ACTIVE BANNER & VOICE ALERTS
-    function handleAlerts(serverAlerts, objects) {
-        const mostCritical = objects.find(o => o.risk_level === "DANGER") ||
-                             objects.find(o => o.risk_level === "WARNING") || null;
-
-        updateAlertBanner(mostCritical);
-
-        if (serverAlerts && serverAlerts.length > 0) {
-            serverAlerts.forEach(alert => {
-                appendAlertLog(alert);
-                // Play authentic native Vietnamese MP3 audio directly
-                playVietnameseAlert(alert);
-            });
-        }
-    }
-
-    function updateAlertBanner(obj) {
-        if (!obj || obj.risk_level === "SAFE") {
-            activeBanner.className = "alert-banner alert-idle";
-            alertTitle.textContent = "Môi trường an toàn";
-            alertDesc.textContent = "Chưa phát hiện vật cản trong cự ly nguy hiểm.";
-            alertBadgeDist.textContent = "-- m";
-            alertIconBox.textContent = "🛡️";
-            return;
-        }
-
-        if (obj.risk_level === "DANGER") {
-            activeBanner.className = "alert-banner alert-danger-active";
-            alertIconBox.textContent = "⚠️";
-            alertTitle.textContent = `NGUY HIỂM: ${obj.name_vi.toUpperCase()} (${obj.direction_vi})`;
-            alertDesc.textContent = `Vật cản ở cự ly rất gần! Hãy giảm tốc độ hoặc đổi hướng.`;
-            alertBadgeDist.textContent = `${obj.distance.toFixed(1)}m`;
-        } else if (obj.risk_level === "WARNING") {
-            activeBanner.className = "alert-banner alert-warning-active";
-            alertIconBox.textContent = "👁️";
-            alertTitle.textContent = `CHÚ Ý: Có ${obj.name_vi} ${obj.direction_vi.toLowerCase()}`;
-            alertDesc.textContent = `Vật cản trong cự ly cần chú ý (${obj.distance.toFixed(1)}m).`;
-            alertBadgeDist.textContent = `${obj.distance.toFixed(1)}m`;
-        }
-    }
-
-    function appendAlertLog(alert) {
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString();
-        const riskCls = alert.risk_level.toLowerCase();
-
-        const entry = document.createElement("div");
-        entry.className = `log-entry ${riskCls}`;
-        entry.innerHTML = `
-            <span class="log-time">[${timeStr}]</span>
-            <span class="log-text">${alert.text_vi}</span>
-        `;
-
-        if (alertsLogContainer.querySelector(".log-empty-msg")) {
-            alertsLogContainer.innerHTML = "";
-        }
-
-        alertsLogContainer.prepend(entry);
-        if (alertsLogContainer.children.length > 30) {
-            alertsLogContainer.removeChild(alertsLogContainer.lastChild);
-        }
-    }
-
     async function playVietnameseText(text) {
         if (!state.voiceEnabled || !text) return;
         try {
@@ -615,7 +211,643 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // CONTROLS & SETTINGS LISTENERS
+    // MODE SWITCHING LOGIC
+    function switchMode(newMode) {
+        if (state.mode === newMode) return;
+        state.mode = newMode;
+
+        if (newMode === "nav") {
+            tabModeNav.classList.add("active");
+            tabModeNav.setAttribute("aria-selected", "true");
+            tabModeOcr.classList.remove("active");
+            tabModeOcr.setAttribute("aria-selected", "false");
+
+            panelViewTitle.textContent = "Camera Trực Tiếp & Phân Tích AR";
+            panelViewSubtitle.textContent = "Khung phân tích 15 lớp vật thể";
+            activeBanner.style.display = "flex";
+            navLegendBar.style.display = "flex";
+            navSideSection.style.display = "block";
+            ocrSideSection.style.display = "none";
+            ocrViewfinderGuide.style.display = "none";
+            ocrActionBar.style.display = "none";
+            focalSettingItem.style.display = "block";
+            confSettingItem.style.display = "block";
+            navZoneElements.forEach(el => el.style.display = "block");
+
+            // Pause OCR audio if playing
+            ocrAudio.pause();
+            state.ocrIsPlaying = false;
+
+            playVietnameseText("Đã chuyển sang chế độ tránh vật cản và định vị.");
+        } else if (newMode === "ocr") {
+            tabModeOcr.classList.add("active");
+            tabModeOcr.setAttribute("aria-selected", "true");
+            tabModeNav.classList.remove("active");
+            tabModeNav.setAttribute("aria-selected", "false");
+
+            panelViewTitle.textContent = "Camera Trực Tiếp & Đọc Văn Bản";
+            panelViewSubtitle.textContent = "Trợ lý OCR nhận diện sách, nhãn hàng & tài liệu";
+            activeBanner.style.display = "none";
+            navLegendBar.style.display = "none";
+            navSideSection.style.display = "none";
+            ocrSideSection.style.display = "block";
+            ocrViewfinderGuide.style.display = "flex";
+            ocrActionBar.style.display = "flex";
+            focalSettingItem.style.display = "none";
+            confSettingItem.style.display = "none";
+            navZoneElements.forEach(el => el.style.display = "none");
+
+            // Clear HUD canvas
+            hudCtx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
+
+            playVietnameseText("Đã chuyển sang chế độ đọc văn bản. Hướng camera vào tài liệu và bấm nút Đọc văn bản hoặc phím T.");
+        }
+    }
+
+    tabModeNav.addEventListener("click", () => switchMode("nav"));
+    tabModeOcr.addEventListener("click", () => switchMode("ocr"));
+
+    // CAMERA INITIALIZATION
+    async function startCamera() {
+        try {
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            alertAudio.load();
+            ocrAudio.load();
+
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+                if (!isLocal && location.protocol !== "https:") {
+                    alert(
+                        "⚠️ TRÌNH DUYỆT YÊU CẦU HTTPS KHI DÙNG CAMERA TRÊN ĐIỆN THOẠI:\n\n" +
+                        "Vui lòng truy cập bằng đường dẫn: https://" + location.hostname + ":" + location.port + "\n" +
+                        "(Sau đó bấm 'Nâng cao' -> 'Tiếp tục truy cập')"
+                    );
+                    return;
+                } else {
+                    alert("Trình duyệt của bạn không hỗ trợ hoặc đang chặn MediaDevices API.");
+                    return;
+                }
+            }
+
+            let stream = null;
+            try {
+                const constraints = {
+                    video: {
+                        facingMode: state.facingMode ? { ideal: state.facingMode } : undefined,
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    },
+                    audio: false
+                };
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (constraintErr) {
+                console.warn("[Second Eye] Retrying with generic video constraints:", constraintErr);
+                stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            }
+
+            video.srcObject = stream;
+            video.onloadedmetadata = () => { resizeCanvases(); };
+            await video.play();
+
+            state.isStreaming = true;
+            camPlaceholder.style.display = "none";
+            camBtnIcon.textContent = "⏸";
+            camBtnText.textContent = "Tạm Dừng";
+            btnCameraToggle.classList.replace("btn-primary", "btn-secondary");
+            streamStatusDot.classList.add("dot-live");
+            streamStatusText.textContent = "Camera đang chạy";
+
+            playVietnameseText(state.mode === "nav" ? "Camera đã khởi động. Đang quét vật cản." : "Camera đã sẵn sàng đọc văn bản.");
+
+            resizeCanvases();
+            requestAnimationFrame(processFrameLoop);
+        } catch (err) {
+            console.error("Camera access error:", err);
+            let userMsg = "Không thể mở camera: " + err.message;
+            if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+                userMsg = "Trình duyệt chưa được cấp quyền Camera. Hãy bấm vào biểu tượng Ổ khóa trên thanh địa chỉ để Cho phép (Allow).";
+            }
+            alert(userMsg);
+        }
+    }
+
+    function stopCamera() {
+        if (video.srcObject) {
+            video.srcObject.getTracks().forEach(track => track.stop());
+            video.srcObject = null;
+        }
+        state.isStreaming = false;
+        camPlaceholder.style.display = "flex";
+        camBtnIcon.textContent = "▶";
+        camBtnText.textContent = "Bật Camera";
+        btnCameraToggle.classList.replace("btn-secondary", "btn-primary");
+        streamStatusDot.classList.remove("dot-live");
+        streamStatusText.textContent = "Camera đã dừng";
+        
+        hudCtx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
+        state.currentObjects = [];
+        updateObjectsList([]);
+        updateAlertBanner(null);
+    }
+
+    function toggleCamera() {
+        if (state.isStreaming) stopCamera();
+        else startCamera();
+    }
+
+    async function switchCamera() {
+        state.facingMode = state.facingMode === "environment" ? "user" : "environment";
+        if (state.isStreaming) {
+            stopCamera();
+            await startCamera();
+        }
+    }
+
+    function resizeCanvases() {
+        const vw = video.videoWidth || 640;
+        const vh = video.videoHeight || 480;
+        hudCanvas.width = vw;
+        hudCanvas.height = vh;
+    }
+
+    // PROCESSING & INFERENCE LOOP (FOR NAVIGATION MODE)
+    const offscreenCanvas = document.createElement("canvas");
+    const offCtx = offscreenCanvas.getContext("2d");
+
+    async function processFrameLoop() {
+        if (!state.isStreaming) return;
+
+        // In OCR Mode, we don't spam YOLO object detection on every frame to save CPU/Battery
+        if (state.mode === "nav") {
+            if (!state.isProcessingFrame && video.readyState >= video.HAVE_CURRENT_DATA) {
+                state.isProcessingFrame = true;
+                await processNavFrame();
+                state.isProcessingFrame = false;
+            }
+        }
+
+        requestAnimationFrame(processFrameLoop);
+    }
+
+    async function processNavFrame() {
+        const vw = video.videoWidth || 640;
+        const vh = video.videoHeight || 480;
+        offscreenCanvas.width = 640;
+        offscreenCanvas.height = 480;
+        offCtx.drawImage(video, 0, 0, 640, 480);
+        const base64Img = offscreenCanvas.toDataURL("image/jpeg", 0.65);
+
+        try {
+            const response = await fetch("/api/detect_frame", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    image: base64Img,
+                    focal_length: state.focalLength,
+                    confidence_threshold: state.confidence
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                statFps.textContent = data.fps || "0.0";
+                statLatency.textContent = `${data.inference_ms || 0}ms`;
+
+                state.currentObjects = data.objects || [];
+                state.radarObjects = state.currentObjects;
+
+                drawHUD(state.currentObjects);
+                updateObjectsList(state.currentObjects);
+                renderRadar();
+
+                if (data.active_alert) {
+                    updateAlertBanner(data.active_alert);
+                    playVietnameseAlert(data.active_alert);
+                    addAlertLog(data.active_alert);
+                } else if (state.currentObjects.length === 0) {
+                    updateAlertBanner(null);
+                }
+            }
+        } catch (err) {
+            console.warn("Detection network glitch:", err);
+        }
+    }
+
+    // OCR TEXT & DOCUMENT READING ENGINE
+    async function triggerOCRReading() {
+        if (state.isReadingOCR) return;
+        if (!state.isStreaming && (!video.srcObject || video.readyState < 2)) {
+            alert("Vui lòng Bật Camera trước khi quét văn bản.");
+            await startCamera();
+            return;
+        }
+
+        state.isReadingOCR = true;
+        btnOcrSnap.classList.add("loading");
+        btnOcrSnap.querySelector(".btn-text").textContent = "ĐANG ĐỌC VĂN BẢN...";
+        ocrStatusLabel.textContent = "⏳ Đang phân tích chữ & tổng hợp giọng đọc Tiếng Việt...";
+
+        // Capture high-res frame
+        const vw = video.videoWidth || 1280;
+        const vh = video.videoHeight || 720;
+        offscreenCanvas.width = vw;
+        offscreenCanvas.height = vh;
+        offCtx.drawImage(video, 0, 0, vw, vh);
+        const base64Img = offscreenCanvas.toDataURL("image/jpeg", 0.85);
+
+        try {
+            const res = await fetch("/api/ocr/read_frame", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    image: base64Img,
+                    synthesize_audio: true
+                })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                state.ocrResult = data;
+                state.ocrParagraphs = data.audio_paragraphs || [];
+                state.ocrCurrentParaIdx = 0;
+
+                // Update Stats
+                ocrStatsBadge.textContent = `${data.word_count} từ | ${Math.round(data.avg_confidence * 100)}% độ tin cậy`;
+
+                if (!data.full_text || data.full_text.trim().length === 0) {
+                    ocrStatusLabel.textContent = "❌ Không tìm thấy văn bản rõ ràng. Hãy đưa tài liệu lại gần và đủ sáng.";
+                    ocrTextDisplay.innerHTML = `
+                        <div class="ocr-empty-hint">
+                            <span class="hint-icon">🔍</span>
+                            <h4>Không nhận diện được văn bản</h4>
+                            <p>Hãy giữ thẳng camera, đảm bảo đủ ánh sáng và đưa tài liệu vào khung ngắm.</p>
+                        </div>
+                    `;
+                    playVietnameseText("Không tìm thấy văn bản rõ ràng. Vui lòng thử lại.");
+                } else {
+                    ocrStatusLabel.textContent = `✅ Đã nhận diện ${data.word_count} từ (${data.paragraphs.length} đoạn). Đang đọc...`;
+                    renderOCRTextContent(data.paragraphs);
+                    drawOCROverlay(data.lines);
+                    startSequentialReading();
+                }
+            } else {
+                ocrStatusLabel.textContent = "Lỗi khi xử lý ảnh.";
+            }
+        } catch (e) {
+            console.error("OCR request error:", e);
+            ocrStatusLabel.textContent = "Lỗi kết nối máy chủ OCR.";
+        } finally {
+            state.isReadingOCR = false;
+            btnOcrSnap.classList.remove("loading");
+            btnOcrSnap.querySelector(".btn-text").textContent = "ĐỌC VĂN BẢN NÀY (PHÍM T)";
+        }
+    }
+
+    function renderOCRTextContent(paragraphs) {
+        if (!paragraphs || paragraphs.length === 0) return;
+        ocrTextDisplay.innerHTML = "";
+        paragraphs.forEach((p, idx) => {
+            const pEl = document.createElement("p");
+            pEl.className = "ocr-para";
+            pEl.id = `ocr-para-${idx}`;
+            pEl.style.fontSize = `${state.ocrFontSize}rem`;
+            pEl.textContent = p;
+            pEl.addEventListener("click", () => {
+                jumpToParagraph(idx);
+            });
+            ocrTextDisplay.appendChild(pEl);
+        });
+    }
+
+    function drawOCROverlay(lines) {
+        hudCtx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
+        if (!lines || lines.length === 0) return;
+
+        const scaleX = hudCanvas.width / (video.videoWidth || hudCanvas.width);
+        const scaleY = hudCanvas.height / (video.videoHeight || hudCanvas.height);
+
+        lines.forEach((l, idx) => {
+            const [x, y, w, h] = l.rect;
+            hudCtx.strokeStyle = "rgba(0, 242, 254, 0.9)";
+            hudCtx.lineWidth = 2;
+            hudCtx.fillStyle = "rgba(0, 242, 254, 0.15)";
+            hudCtx.fillRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
+            hudCtx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
+
+            // Badge
+            hudCtx.fillStyle = "#00f2fe";
+            hudCtx.beginPath();
+            hudCtx.arc(x * scaleX + 8, y * scaleY + 8, 8, 0, Math.PI * 2);
+            hudCtx.fill();
+            hudCtx.fillStyle = "#000";
+            hudCtx.font = "bold 10px JetBrains Mono";
+            hudCtx.fillText(String(idx + 1), x * scaleX + 5, y * scaleY + 11);
+        });
+    }
+
+    function startSequentialReading() {
+        if (!state.ocrParagraphs || state.ocrParagraphs.length === 0) return;
+        state.ocrCurrentParaIdx = 0;
+        playCurrentParagraph();
+    }
+
+    function playCurrentParagraph() {
+        if (state.ocrCurrentParaIdx >= state.ocrParagraphs.length) {
+            state.ocrIsPlaying = false;
+            ocrPlayIcon.textContent = "▶";
+            ocrPlayText.textContent = "Đọc Lại";
+            ocrStatusLabel.textContent = "✅ Đã đọc xong toàn bộ văn bản.";
+            document.querySelectorAll(".ocr-para").forEach(el => el.classList.remove("para-active"));
+            return;
+        }
+
+        const item = state.ocrParagraphs[state.ocrCurrentParaIdx];
+        document.querySelectorAll(".ocr-para").forEach(el => el.classList.remove("para-active"));
+        const activeParaEl = document.getElementById(`ocr-para-${state.ocrCurrentParaIdx}`);
+        if (activeParaEl) {
+            activeParaEl.classList.add("para-active");
+            activeParaEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+
+        if (item.audio_base64) {
+            state.ocrIsPlaying = true;
+            ocrPlayIcon.textContent = "⏸️";
+            ocrPlayText.textContent = "Tạm Dừng";
+            ocrStatusLabel.textContent = `🔊 Đang đọc đoạn ${state.ocrCurrentParaIdx + 1}/${state.ocrParagraphs.length}...`;
+
+            ocrAudio.src = item.audio_base64;
+            const speed = parseFloat(ocrSpeedSelect.value) || 1.0;
+            ocrAudio.playbackRate = speed;
+
+            ocrAudio.onended = () => {
+                state.ocrCurrentParaIdx++;
+                playCurrentParagraph();
+            };
+
+            ocrAudio.onerror = () => {
+                state.ocrCurrentParaIdx++;
+                playCurrentParagraph();
+            };
+
+            ocrAudio.play().catch(e => {
+                console.warn("OCR Audio play prevented:", e);
+                state.ocrIsPlaying = false;
+            });
+        }
+    }
+
+    function toggleOCRPlayPause() {
+        if (!state.ocrParagraphs || state.ocrParagraphs.length === 0) {
+            triggerOCRReading();
+            return;
+        }
+
+        if (state.ocrIsPlaying) {
+            ocrAudio.pause();
+            state.ocrIsPlaying = false;
+            ocrPlayIcon.textContent = "▶";
+            ocrPlayText.textContent = "Tiếp Tục";
+            ocrStatusLabel.textContent = "⏸️ Đã tạm dừng đọc.";
+        } else {
+            if (state.ocrCurrentParaIdx >= state.ocrParagraphs.length) {
+                state.ocrCurrentParaIdx = 0;
+            }
+            playCurrentParagraph();
+        }
+    }
+
+    function replayOCR() {
+        if (!state.ocrParagraphs || state.ocrParagraphs.length === 0) {
+            triggerOCRReading();
+            return;
+        }
+        state.ocrCurrentParaIdx = 0;
+        playCurrentParagraph();
+    }
+
+    function jumpToParagraph(idx) {
+        state.ocrCurrentParaIdx = idx;
+        playCurrentParagraph();
+    }
+
+    // OCR Action Button Listeners
+    btnOcrSnap.addEventListener("click", triggerOCRReading);
+    btnOcrPlayPause.addEventListener("click", toggleOCRPlayPause);
+    btnOcrReplay.addEventListener("click", replayOCR);
+
+    btnTextLarger.addEventListener("click", () => {
+        state.ocrFontSize = Math.min(2.2, state.ocrFontSize + 0.15);
+        document.querySelectorAll(".ocr-para").forEach(p => p.style.fontSize = `${state.ocrFontSize}rem`);
+    });
+
+    btnTextSmaller.addEventListener("click", () => {
+        state.ocrFontSize = Math.max(0.9, state.ocrFontSize - 0.15);
+        document.querySelectorAll(".ocr-para").forEach(p => p.style.fontSize = `${state.ocrFontSize}rem`);
+    });
+
+    btnCopyOcr.addEventListener("click", () => {
+        if (state.ocrResult && state.ocrResult.full_text) {
+            navigator.clipboard.writeText(state.ocrResult.full_text);
+            ocrStatusLabel.textContent = "📋 Đã sao chép văn bản vào clipboard!";
+            setTimeout(() => { ocrStatusLabel.textContent = "✅ Văn bản sẵn sàng."; }, 2500);
+        }
+    });
+
+    btnClearOcr.addEventListener("click", () => {
+        ocrAudio.pause();
+        state.ocrIsPlaying = false;
+        state.ocrResult = null;
+        state.ocrParagraphs = [];
+        ocrStatsBadge.textContent = "0 từ | 0% độ tin cậy";
+        ocrStatusLabel.textContent = "Hướng camera vào tài liệu và bấm [Đọc Văn Bản]";
+        ocrTextDisplay.innerHTML = `
+            <div class="ocr-empty-hint">
+                <span class="hint-icon">📄</span>
+                <h4>Chưa có văn bản nào được quét</h4>
+                <p>Hướng camera về phía sách, tài liệu in, nhãn thuốc,... và bấm <strong>[Đọc Văn Bản Này]</strong>.</p>
+            </div>
+        `;
+        hudCtx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
+    });
+
+    ocrSpeedSelect.addEventListener("change", (e) => {
+        const speed = parseFloat(e.target.value) || 1.0;
+        ocrAudio.playbackRate = speed;
+    });
+
+    // DRAW HUD OVERLAYS (NAVIGATION MODE)
+    function drawHUD(objects) {
+        hudCtx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
+        if (state.mode !== "nav" || !objects || objects.length === 0) return;
+
+        const scaleX = hudCanvas.width / 640;
+        const scaleY = hudCanvas.height / 480;
+
+        objects.forEach(obj => {
+            const [x1, y1, x2, y2] = obj.bbox.map((v, i) => i % 2 === 0 ? v * scaleX : v * scaleY);
+            let color = "#10b981";
+            if (obj.risk_level === "DANGER") color = "#ef4444";
+            else if (obj.risk_level === "WARNING") color = "#f59e0b";
+
+            hudCtx.strokeStyle = color;
+            hudCtx.lineWidth = (obj.risk_level === "DANGER") ? 3 : 2;
+            hudCtx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+
+            // Bounding box corner accents
+            const cl = Math.min(15, (x2 - x1) / 4, (y2 - y1) / 4);
+            hudCtx.lineWidth = 4;
+            hudCtx.beginPath();
+            hudCtx.moveTo(x1, y1 + cl); hudCtx.lineTo(x1, y1); hudCtx.lineTo(x1 + cl, y1);
+            hudCtx.moveTo(x2 - cl, y1); hudCtx.lineTo(x2, y1); hudCtx.lineTo(x2, y1 + cl);
+            hudCtx.moveTo(x1, y2 - cl); hudCtx.lineTo(x1, y2); hudCtx.lineTo(x1 + cl, y2);
+            hudCtx.moveTo(x2 - cl, y2); hudCtx.lineTo(x2, y2); hudCtx.lineTo(x2, y2 - cl);
+            hudCtx.stroke();
+
+            // Badge text
+            const badgeText = `${obj.name_vi.toUpperCase()} | ${obj.distance.toFixed(1)}m`;
+            hudCtx.font = "bold 13px 'Outfit', sans-serif";
+            const textMetrics = hudCtx.measureText(badgeText);
+            const bgW = textMetrics.width + 12;
+            const bgH = 20;
+
+            hudCtx.fillStyle = color;
+            hudCtx.fillRect(x1, Math.max(0, y1 - bgH), bgW, bgH);
+            hudCtx.fillStyle = (obj.risk_level === "WARNING") ? "#000000" : "#ffffff";
+            hudCtx.fillText(badgeText, x1 + 6, Math.max(14, y1 - 5));
+        });
+    }
+
+    // 2D TOP-DOWN RADAR RENDERER
+    function renderRadar() {
+        radarCtx.clearRect(0, 0, radarCanvas.width, radarCanvas.height);
+        const cx = radarCanvas.width / 2;
+        const cy = radarCanvas.height - 20;
+        const maxRange = 4.0; // 4 meters
+        const scale = (radarCanvas.height - 40) / maxRange;
+
+        // Radar sweep background rings
+        for (let r = 1.0; r <= maxRange; r += 1.0) {
+            const rad = r * scale;
+            radarCtx.strokeStyle = "rgba(0, 242, 254, 0.15)";
+            radarCtx.lineWidth = 1;
+            radarCtx.beginPath();
+            radarCtx.arc(cx, cy, rad, Math.PI, 2 * Math.PI);
+            radarCtx.stroke();
+
+            radarCtx.fillStyle = "rgba(148, 163, 184, 0.5)";
+            radarCtx.font = "10px 'JetBrains Mono'";
+            radarCtx.fillText(`${r.toFixed(0)}m`, cx + 4, cy - rad + 12);
+        }
+
+        // Radar sector divider rays
+        [-0.4, 0, 0.4].forEach(angle => {
+            radarCtx.strokeStyle = "rgba(0, 242, 254, 0.12)";
+            radarCtx.beginPath();
+            radarCtx.moveTo(cx, cy);
+            radarCtx.lineTo(cx + Math.sin(angle) * maxRange * scale, cy - Math.cos(angle) * maxRange * scale);
+            radarCtx.stroke();
+        });
+
+        // Dynamic sweep line
+        state.radarAngle += 0.04;
+        const sweepAngle = Math.sin(state.radarAngle) * 0.7;
+        radarCtx.strokeStyle = "rgba(0, 242, 254, 0.4)";
+        radarCtx.lineWidth = 2;
+        radarCtx.beginPath();
+        radarCtx.moveTo(cx, cy);
+        radarCtx.lineTo(cx + Math.sin(sweepAngle) * maxRange * scale, cy - Math.cos(sweepAngle) * maxRange * scale);
+        radarCtx.stroke();
+
+        // Render detected objects as radar blips
+        state.radarObjects.forEach(obj => {
+            const [x_lat, z_depth] = obj.coord_3d;
+            if (z_depth > maxRange) return;
+
+            const px = cx + (x_lat * scale);
+            const py = cy - (z_depth * scale);
+
+            let blipColor = "#10b981";
+            if (obj.risk_level === "DANGER") blipColor = "#ef4444";
+            else if (obj.risk_level === "WARNING") blipColor = "#f59e0b";
+
+            // Blip glow
+            radarCtx.fillStyle = blipColor;
+            radarCtx.beginPath();
+            radarCtx.arc(px, py, 6, 0, Math.PI * 2);
+            radarCtx.fill();
+
+            // Label
+            radarCtx.fillStyle = "#ffffff";
+            radarCtx.font = "bold 9px 'Outfit'";
+            radarCtx.fillText(obj.name_vi, px + 8, py + 3);
+        });
+    }
+
+    // UI UPDATE HELPERS
+    function updateAlertBanner(alert) {
+        if (!alert) {
+            activeBanner.className = "alert-banner alert-idle";
+            alertIconBox.textContent = "🛡️";
+            alertTitle.textContent = "Môi trường an toàn";
+            alertDesc.textContent = "Chưa phát hiện vật cản trong cự ly nguy hiểm.";
+            alertBadgeDist.textContent = "-- m";
+            return;
+        }
+
+        const isDanger = (alert.risk_level === "DANGER");
+        activeBanner.className = `alert-banner ${isDanger ? "alert-danger" : "alert-warning"}`;
+        alertIconBox.textContent = isDanger ? "⚠️" : "👀";
+        alertTitle.textContent = isDanger ? "CẢNH BÁO NGUY HIỂM!" : "Cảnh Giác Vật Cản";
+        alertDesc.textContent = alert.text_vi;
+        alertBadgeDist.textContent = `${alert.distance.toFixed(1)} m`;
+    }
+
+    function updateObjectsList(objects) {
+        detectedCount.textContent = `${objects.length} đối tượng`;
+        if (objects.length === 0) {
+            objectsListContainer.innerHTML = `<div class="empty-list-msg">Không có vật thể nào trong tầm nhìn</div>`;
+            return;
+        }
+
+        objectsListContainer.innerHTML = "";
+        objects.forEach(obj => {
+            const item = document.createElement("div");
+            item.className = `object-item obj-risk-${obj.risk_level.toLowerCase()}`;
+            item.innerHTML = `
+                <div class="obj-main-info">
+                    <span class="obj-name">${obj.name_vi.toUpperCase()}</span>
+                    <span class="obj-dir">${obj.direction_vi}</span>
+                </div>
+                <div class="obj-metric-info">
+                    <span class="obj-dist font-mono">${obj.distance.toFixed(1)}m</span>
+                    <span class="obj-conf font-mono">${Math.round(obj.confidence * 100)}%</span>
+                </div>
+            `;
+            objectsListContainer.appendChild(item);
+        });
+    }
+
+    function addAlertLog(alert) {
+        const timeStr = new Date().toLocaleTimeString('vi-VN');
+        const emptyMsg = alertsLogContainer.querySelector(".log-empty-msg");
+        if (emptyMsg) emptyMsg.remove();
+
+        const logItem = document.createElement("div");
+        logItem.className = `log-item log-${alert.risk_level.toLowerCase()}`;
+        logItem.innerHTML = `
+            <span class="log-time font-mono">${timeStr}</span>
+            <span class="log-text">${alert.text_vi}</span>
+        `;
+        alertsLogContainer.insertBefore(logItem, alertsLogContainer.firstChild);
+
+        if (alertsLogContainer.children.length > 30) {
+            alertsLogContainer.removeChild(alertsLogContainer.lastChild);
+        }
+    }
+
+    // GENERAL LISTENERS
     btnCameraToggle.addEventListener("click", toggleCamera);
     btnStartHero.addEventListener("click", startCamera);
     btnSwitchCamera.addEventListener("click", switchCamera);
@@ -630,8 +862,9 @@ document.addEventListener("DOMContentLoaded", () => {
             playVietnameseText("Âm thanh cảnh báo đã được bật.");
         } else {
             alertAudio.pause();
-            alertAudio.currentTime = 0;
+            ocrAudio.pause();
             isAudioPlaying = false;
+            state.ocrIsPlaying = false;
         }
     });
 
@@ -643,11 +876,6 @@ document.addEventListener("DOMContentLoaded", () => {
     confSlider.addEventListener("input", (e) => {
         state.confidence = parseFloat(e.target.value);
         confValDisplay.textContent = `${Math.round(state.confidence * 100)}%`;
-    });
-
-    speechRateSlider.addEventListener("input", (e) => {
-        state.speechRate = parseFloat(e.target.value);
-        speechRateDisplay.textContent = `${state.speechRate.toFixed(1)}x`;
     });
 
     btnClearLog.addEventListener("click", () => {
@@ -682,95 +910,150 @@ document.addEventListener("DOMContentLoaded", () => {
     btnCloseShortcutsModal.addEventListener("click", () => { shortcutsModal.style.display = "none"; });
     btnCloseShortcuts.addEventListener("click", () => { shortcutsModal.style.display = "none"; });
 
-    // UPLOAD IMAGE/VIDEO FILE HANDLER
-    fileInput.addEventListener("change", (e) => {
+    // UPLOAD IMAGE FILE HANDLER
+    fileInput.addEventListener("change", async (e) => {
         const file = e.target.files[0];
         if (!file) return;
 
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            const img = new Image();
-            img.onload = async () => {
-                offscreenCanvas.width = img.width;
-                offscreenCanvas.height = img.height;
-                offCtx.drawImage(img, 0, 0);
-                const base64 = offscreenCanvas.toDataURL("image/jpeg", 0.7);
+        if (state.mode === "ocr") {
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("synthesize_audio", "true");
 
-                // Stop live stream if active
-                if (state.isStreaming) stopCamera();
-
-                camPlaceholder.style.display = "none";
-                hudCanvas.width = img.width;
-                hudCanvas.height = img.height;
-
-                // Draw static image on canvas
-                const ctx = hudCanvas.getContext("2d");
-                ctx.drawImage(img, 0, 0);
-
-                const res = await fetch("/api/detect_frame", {
+            ocrStatusLabel.textContent = "⏳ Đang phân tích chữ trong file ảnh tải lên...";
+            try {
+                const res = await fetch("/api/ocr/read_file", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        image: base64,
-                        focal_length: state.focalLength,
-                        conf_threshold: state.confidence
-                    })
+                    body: formData
                 });
-
                 if (res.ok) {
                     const data = await res.json();
-                    state.currentObjects = data.objects || [];
-                    state.radarObjects = state.currentObjects;
-                    drawHUD(state.currentObjects);
-                    updateObjectsList(state.currentObjects);
-                    handleAlerts(data.alerts || [], state.currentObjects);
-                    renderRadar();
+                    state.ocrResult = data;
+                    state.ocrParagraphs = data.audio_paragraphs || [];
+                    state.ocrCurrentParaIdx = 0;
+                    ocrStatsBadge.textContent = `${data.word_count} từ | ${Math.round(data.avg_confidence * 100)}% độ tin cậy`;
+
+                    renderOCRTextContent(data.paragraphs);
+                    if (data.annotated_image) {
+                        const img = new Image();
+                        img.onload = () => {
+                            hudCanvas.width = img.width;
+                            hudCanvas.height = img.height;
+                            hudCtx.drawImage(img, 0, 0);
+                        };
+                        img.src = data.annotated_image;
+                    }
+                    startSequentialReading();
                 }
+            } catch (err) {
+                console.error("Upload OCR error:", err);
+            }
+        } else {
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                const img = new Image();
+                img.onload = async () => {
+                    offscreenCanvas.width = img.width;
+                    offscreenCanvas.height = img.height;
+                    offCtx.drawImage(img, 0, 0);
+                    const base64 = offscreenCanvas.toDataURL("image/jpeg", 0.7);
+
+                    if (state.isStreaming) stopCamera();
+                    camPlaceholder.style.display = "none";
+                    hudCanvas.width = img.width;
+                    hudCanvas.height = img.height;
+                    const ctx = hudCanvas.getContext("2d");
+                    ctx.drawImage(img, 0, 0);
+
+                    const res = await fetch("/api/detect_frame", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            image: base64,
+                            focal_length: state.focalLength,
+                            confidence_threshold: state.confidence
+                        })
+                    });
+
+                    if (res.ok) {
+                        const data = await res.json();
+                        state.currentObjects = data.objects || [];
+                        state.radarObjects = state.currentObjects;
+                        drawHUD(state.currentObjects);
+                        updateObjectsList(state.currentObjects);
+                        renderRadar();
+                    }
+                };
+                img.src = event.target.result;
             };
-            img.src = event.target.result;
-        };
-        reader.readAsDataURL(file);
+            reader.readAsDataURL(file);
+        }
     });
 
-    // KEYBOARD ACCESSIBILITY SHORTCUTS
+    // KEYBOARD SHORTCUTS
     window.addEventListener("keydown", (e) => {
         if (e.target.tagName === "INPUT" && e.target.type !== "checkbox" && e.target.type !== "range") return;
 
         switch (e.code) {
+            case "Digit1":
+                switchMode("nav");
+                break;
+            case "Digit2":
+                switchMode("ocr");
+                break;
             case "Space":
                 e.preventDefault();
-                toggleCamera();
+                if (state.mode === "ocr") {
+                    triggerOCRReading();
+                } else {
+                    toggleCamera();
+                }
+                break;
+            case "KeyT":
+                if (state.mode !== "ocr") switchMode("ocr");
+                triggerOCRReading();
+                break;
+            case "KeyP":
+                if (state.mode === "ocr") toggleOCRPlayPause();
+                break;
+            case "KeyR":
+                if (state.mode === "ocr") {
+                    replayOCR();
+                } else {
+                    if (state.currentObjects.length > 0) {
+                        const primary = state.currentObjects[0];
+                        playVietnameseText(`Phía trước có ${primary.name_vi}, cách ${primary.distance.toFixed(1)} mét.`);
+                    } else {
+                        playVietnameseText("Hiện không có vật cản nào được phát hiện.");
+                    }
+                }
                 break;
             case "KeyV":
                 btnToggleVoice.click();
                 break;
-            case "KeyR":
-                if (state.currentObjects.length > 0) {
-                    const primary = state.currentObjects[0];
-                    playVietnameseText(`Phía trước có ${primary.name_vi}, cách ${primary.distance.toFixed(1)} mét.`);
-                } else {
-                    playVietnameseText("Hiện không có vật cản nào được phát hiện.");
-                }
-                break;
-            case "Equal": // Key '+'
-                state.focalLength = Math.min(1200, state.focalLength + 25);
-                focalSlider.value = state.focalLength;
-                focalValDisplay.textContent = `${state.focalLength} px`;
-                playVietnameseText(`Tiêu cự ${state.focalLength}`);
-                break;
-            case "Minus": // Key '-'
-                state.focalLength = Math.max(300, state.focalLength - 25);
-                focalSlider.value = state.focalLength;
-                focalValDisplay.textContent = `${state.focalLength} px`;
-                playVietnameseText(`Tiêu cự ${state.focalLength}`);
-                break;
             case "KeyM":
                 switchCamera();
+                break;
+            case "Equal":
+                if (state.mode === "nav") {
+                    state.focalLength = Math.min(1200, state.focalLength + 25);
+                    focalSlider.value = state.focalLength;
+                    focalValDisplay.textContent = `${state.focalLength} px`;
+                    playVietnameseText(`Tiêu cự ${state.focalLength}`);
+                }
+                break;
+            case "Minus":
+                if (state.mode === "nav") {
+                    state.focalLength = Math.max(300, state.focalLength - 25);
+                    focalSlider.value = state.focalLength;
+                    focalValDisplay.textContent = `${state.focalLength} px`;
+                    playVietnameseText(`Tiêu cự ${state.focalLength}`);
+                }
                 break;
             case "Escape":
                 if (classesModal.style.display !== "none") classesModal.style.display = "none";
                 if (shortcutsModal.style.display !== "none") shortcutsModal.style.display = "none";
-                if (state.isStreaming) stopCamera();
+                if (state.ocrIsPlaying) ocrAudio.pause();
                 break;
         }
     });

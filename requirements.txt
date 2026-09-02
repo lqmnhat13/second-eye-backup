@@ -18,3 +18,8 @@ pyttsx3>=2.90
 gTTS>=2.3.2
 pygame>=2.5.0
 requests>=2.31.0
+
+# Optical Character Recognition (Text & Document Reading)
+easyocr>=1.7.0
+scikit-image>=0.21.0
+

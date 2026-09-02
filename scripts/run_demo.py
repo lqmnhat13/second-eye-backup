@@ -29,6 +29,10 @@ def run_demo(
     print("=" * 65)
     
     frame = cv2.imread(image_path)
+    if frame is None:
+        print(f"[Error] Không thể đọc ảnh: {image_path}")
+        return
+
     h, w = frame.shape[:2]
     print(f"Loaded image: {image_path} ({w}x{h} px)")
 
