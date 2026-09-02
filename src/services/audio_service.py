@@ -8,10 +8,13 @@ import os
 import io
 import hashlib
 import base64
+from pathlib import Path
 from typing import Dict, Optional
 from gtts import gTTS
 
-AUDIO_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "audio_cache")
+from src.config import SRC_DIR
+
+AUDIO_CACHE_DIR = SRC_DIR / "web" / "static" / "audio_cache"
 os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
 
 class VietnameseAudioService:

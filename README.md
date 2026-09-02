@@ -1,109 +1,130 @@
-# Second Eye - Indoor Navigation & Obstacle Warning System for the Visually Impaired
-### Hệ Thống Hỗ Trợ Thị Giác Trong Nhà Cho Người Khiếm Thị
+# 👁️ Second Eye - Hệ Thống Trợ Lý Thị Giác Cho Người Khiếm Thị
 
-Second Eye là hệ thống thị giác máy tính AI kết hợp mô hình ước lượng khoảng cách không gian thực và công nghệ cảnh báo giọng nói Tiếng Việt, giúp người khiếm thị nhận diện vật thể xung quanh, đánh giá mức độ nguy hiểm theo thời gian thực và định hướng di chuyển an toàn trong nhà.
-
----
-
-## 🌟 Tính Năng Nổi Bật
-
-1. **Nhận Diện 15 Lớp Đối Tượng Trong Nhà Thiết Yếu**:
-   - `stairs` (Cầu thang - Cảnh báo khẩn cấp)
-   - `person` (Người)
-   - `door` (Cửa ra vào / Cửa phòng)
-   - `chair` (Ghế)
-   - `couch` (Ghế sofa)
-   - `table` (Bàn ăn / Bàn làm việc)
-   - `bed` (Giường)
-   - `tv` (Tivi / Màn hình)
-   - `refrigerator` (Tủ lạnh)
-   - `toilet` (Bồn cầu)
-   - `sink` (Bồn rửa)
-   - `trash_can` (Thùng rác)
-   - `fan` (Quạt đứng / Quạt sàn)
-   - `bottle_cup` (Chai / Ly nước)
-   - `obstacle` (Cột / Vách ngăn / Cây cảnh / Vật cản chung)
-
-2. **Ước Lượng Khoảng Cách Thời Gian Thực (Metric Distance Estimation)**:
-   - Sử dụng mô hình hình học Pinhole kết hợp kích thước vật lý chuẩn của từng loại vật thể.
-   - Ước lượng khoảng cách theo mét chính xác và ổn định ở tốc độ 30 - 60 FPS mà không cần phần cứng cảm biến LiDAR đắt tiền.
-
-3. **Định Vị Vùng Không Gian (Spatial Zone Partitioning)**:
-   - Phân tích tọa độ vật thể thành 3 hướng chính: **Bên trái**, **Phía trước / Ở giữa**, **Bên phải**.
-   - Tự động ưu tiên cảnh báo các vật cản nằm trực diện quỹ đạo di chuyển của người dùng.
-
-4. **Cảnh Báo Thông Minh Đa Tầng Bằng Tiếng Việt (Vietnamese Voice Alerts)**:
-   - 🔴 **Vùng Nguy Hiểm ($< 1.0m$)**: Âm báo khẩn cấp + Giọng đọc tức thì (*"Nguy hiểm! Cầu thang ngay phía trước, cách không phẩy tám mét!"*).
-   - 🟡 **Vùng Cảnh Giác ($1.0m - 2.0m$)**: Giọng đọc định hướng nhẹ nhàng (*"Có ghế bên phải, cách một phẩy hai mét."*).
-   - 🟢 **Vùng An Toàn ($> 2.0m$)**: Giữ yên lặng để chống ô nhiễm tiếng ồn.
-   - **Smart Debounce Cooldown**: Bộ đệm chống nói lặp lại gây khó chịu, tự động ngắt câu cũ khi có nguy cơ va chạm mới.
-
-5. **Giao Diện Hiện Đại & Radar Không Gian 2D**:
-   - Giao diện Web Dashboard Dark Glassmorphism cao cấp.
-   - **Radar 2D Top-down**: Mô phỏng vị trí các vật thể xung quanh người dùng từ trên cao với tia quét radar thời gian thực.
-   - Tích hợp phím tắt trợ năng hoàn chỉnh cho người khiếm thị.
+**Second Eye** là hệ thống thị giác máy tính và hỗ trợ định hướng thời gian thực dành cho người khiếm thị trong môi trường trong nhà (Indoor Navigation). Hệ thống tích hợp mô hình Deep Learning YOLOv8 nhận diện 15 lớp vật thể/vật cản, thuật toán ước lượng khoảng cách dựa trên hình học Pinhole Camera, radar định vị 2D và cảnh báo âm thanh giọng nói Tiếng Việt thông minh.
 
 ---
 
-## 🚀 Hướng Dẫn Khởi Động Nhanh
+## 🏛️ Cấu trúc Dự án (Project Architecture)
 
-### 1. Khởi động Web Dashboard (Khuyên dùng)
+Dự án được xây dựng theo kiến trúc module hóa tiêu chuẩn (**Modular Standard Architecture**):
+
+```text
+Second-Eye/
+├── models/                           # Trọng số mô hình Deep Learning (YOLO weights)
+│   └── yolov8n.pt
+├── src/                              # Toàn bộ mã nguồn cốt lõi (Source Package)
+│   ├── __init__.py
+│   ├── config.py                     # Cấu hình 15 lớp vật thể, ngưỡng an toàn & thông số camera
+│   ├── core/                         # Module Thị giác máy tính & Tính toán hình học
+│   │   ├── __init__.py
+│   │   ├── detector.py               # Nhận diện vật thể YOLOv8 & Vẽ giao diện AR HUD
+│   │   └── distance_estimator.py     # Ước lượng khoảng cách mét & Tọa độ Radar 2D
+│   ├── services/                     # Dịch vụ Âm thanh & Quản lý Cảnh báo
+│   │   ├── __init__.py
+│   │   ├── alert_manager.py          # Hàng đợi cảnh báo ưu tiên, chống spam lặp từ
+│   │   └── audio_service.py          # Tổng hợp giọng nói Tiếng Việt chuẩn qua gTTS & Cache MP3
+│   └── web/                          # Ứng dụng Web Dashboard & REST/WebSocket API
+│       ├── __init__.py
+│       ├── app.py                    # Backend FastAPI & API endpoints
+│       ├── static/                   # Static assets (CSS, JS, Audio Cache)
+│       │   ├── css/style.css
+│       │   ├── js/app.js
+│       │   └── audio_cache/          # Cache file âm thanh MP3
+│       └── templates/                # Giao diện Web HTML
+│           └── index.html
+├── scripts/                          # Entry points thực thi hệ thống
+│   ├── run_server.py                 # Khởi chạy Web Server (Hỗ trợ HTTPS cho camera di động)
+│   ├── run_cli.py                    # Khởi chạy Desktop OpenCV HUD
+│   └── run_demo.py                   # Chạy suy luận AI trên ảnh mẫu
+├── tests/                            # Bộ kiểm thử tự động toàn diện (Unit & Integration)
+│   ├── __init__.py
+│   └── test_system.py                # Kiểm thử 5 thành phần cốt lõi của hệ thống
+├── data/                             # Dữ liệu mẫu & kết quả đầu ra
+│   ├── samples/                      # Ảnh mẫu trong nhà
+│   │   └── indoor_demo.jpg
+│   └── outputs/                      # Ảnh kết quả & snapshots
+├── run.sh                            # Script khởi động đa chế độ (Web, Desktop, Test, Demo)
+├── requirements.txt                  # Danh sách dependencies
+├── pyrightconfig.json                # Cấu hình Language Server / Pyright
+└── .vscode/settings.json             # Cấu hình VS Code
+```
+
+---
+
+## 🚀 Hướng dẫn Khởi chạy (Quick Start)
+
+### 1. Cài đặt Môi trường & Dependencies
 ```bash
+pip install -r requirements.txt
+```
+
+### 2. Khởi chạy bằng Script `run.sh`
+
+```bash
+# [1] Khởi chạy Web Dashboard (Giao diện Web, Radar 2D & Giọng nói Tiếng Việt)
 ./run.sh 1
-# hoặc: python web_app.py
-```
-Truy cập trình duyệt tại: **`http://localhost:8000`**
 
-### 2. Khởi động Desktop OpenCV HUD (Chạy trực tiếp từ Terminal)
-```bash
+# [2] Khởi chạy Desktop HUD trực tiếp trên máy tính (OpenCV Window)
 ./run.sh 2
-# hoặc: python main_cli.py
+
+# [2.1] Khởi chạy Desktop HUD với iPhone / Continuity Camera (source index 1)
+./run.sh 2 1
+
+# [2.2] Khởi chạy Desktop HUD với Camera IP / DroidCam
+./run.sh 2 "http://192.168.1.15:8080/video"
+
+# [3] Chạy toàn bộ bài kiểm thử tự động (Unit & Integration Tests)
+./run.sh 3
+
+# [4] Chạy demo trên ảnh mẫu trong nhà
+./run.sh 4
 ```
 
-### 3. Chạy Kiểm Thử Hệ Thống (Unit & Integration Tests)
+---
+
+## 📱 Hướng dẫn Dùng Camera Điện thoại (iPhone / Android)
+
+Hệ thống Web Dashboard đã được tích hợp sẵn **HTTPS** để hỗ trợ camera di động qua mạng Wi-Fi:
+
+1. Chạy máy chủ: `./run.sh 1`
+2. Mở trình duyệt trên điện thoại (Safari hoặc Chrome) và truy cập đường dẫn `https://<IP_MACBOOK>:8000` (ví dụ: `https://192.168.1.47:8000`).
+3. Khi trình duyệt cảnh báo chứng chỉ SSL nội bộ:
+   - Chọn **Nâng cao (Advanced)** -> Bấm **Tiếp tục truy cập (Proceed)**.
+4. Bấm nút **"Bật Camera"** và cấp quyền để quét vật cản trực tiếp bằng camera sau của điện thoại.
+
+---
+
+## 🎯 15 Lớp Vật thể Hỗ trợ (Indoor Classes)
+
+| STT | Tên Tiếng Việt | Tên Tiếng Anh | Chiều cao vật lý | Mức độ ưu tiên |
+|:---:|:---|:---|:---:|:---:|
+| 1 | Cầu thang | `stairs` | 1.00 m | Mức 1 (Nguy hiểm cao) |
+| 2 | Người | `person` | 1.65 m | Mức 1 (Nguy hiểm cao) |
+| 3 | Cửa | `door` | 2.00 m | Mức 2 (Định hướng) |
+| 4 | Ghế | `chair` | 0.85 m | Mức 2 (Vật cản ngã) |
+| 5 | Ghế sofa | `couch` | 0.85 m | Mức 2 |
+| 6 | Bàn | `table` | 0.75 m | Mức 2 (Tầm bụng) |
+| 7 | Giường | `bed` | 0.60 m | Mức 2 |
+| 8 | Tivi / Màn hình | `tv` | 0.60 m | Mức 3 |
+| 9 | Tủ lạnh | `refrigerator` | 1.70 m | Mức 2 |
+| 10 | Bồn cầu | `toilet` | 0.75 m | Mức 2 (Khu vệ sinh) |
+| 11 | Bồn rửa | `sink` | 0.85 m | Mức 2 |
+| 12 | Thùng rác | `trash_can` | 0.45 m | Mức 1 (Vật cản sàn) |
+| 13 | Quạt | `fan` | 1.10 m | Mức 1 (Cánh/Dây điện) |
+| 14 | Chai / Ly | `bottle_cup` | 0.22 m | Mức 3 (Đổ vỡ) |
+| 15 | Vật cản chung | `obstacle` | 1.40 m | Mức 1 (Cột, cây, vali) |
+
+---
+
+## 🧪 Kiểm thử Hệ thống
+
+Chạy test tự động để đảm bảo toàn bộ pipeline hoạt động hoàn hảo:
 ```bash
 ./run.sh 3
-# hoặc: python test_sample.py
+# hoặc: PYTHONPATH=. python tests/test_system.py
 ```
-
-### 4. Chạy Thử Nghiệm Trên Ảnh Mẫu
-```bash
-./run.sh 4
-# hoặc: python demo_inference.py
-```
-
----
-
-## ⌨️ Phím Tắt Trợ Năng Cho Người Khiếm Thị
-
-| Phím tắt | Chức năng |
-|---|---|
-| <kbd>Space</kbd> | Bật / Tạm dừng luồng Camera |
-| <kbd>V</kbd> | Bật / Tắt giọng đọc cảnh báo Tiếng Việt |
-| <kbd>R</kbd> | Yêu cầu đọc lại cảnh báo vật cản gần nhất ngay lập tức |
-| <kbd>+</kbd> / <kbd>-</kbd> | Tăng / Giảm tiêu cự camera để hiệu chuẩn khoảng cách |
-| <kbd>M</kbd> | Chuyển đổi giữa Camera trước và Camera sau |
-| <kbd>Esc</kbd> | Dừng camera và đóng tất cả cửa sổ cài đặt |
-
----
-
-## 📁 Cấu Trúc Dự Án
-
-```
-Second-Eye/
-├── config.py              # Cấu hình 15 lớp, chiều cao vật lý, ngưỡng khoảng cách
-├── detector.py            # AI Object Detection Engine (YOLOv8 + Apple MPS/CUDA/CPU)
-├── distance_estimator.py  # Thuật toán Pinhole geometry & tọa độ không gian 3D
-├── alert_system.py        # Quản lý hàng đợi âm thanh & giọng nói Tiếng Việt
-├── web_app.py             # FastAPI backend API & WebSocket/Streaming server
-├── main_cli.py            # Ứng dụng Desktop OpenCV HUD tương tác
-├── test_sample.py         # Bộ kiểm thử tự động toàn diện
-├── demo_inference.py      # Script demo nhận diện ảnh mẫu
-├── run.sh                 # Script khởi động hệ thống tiện lợi
-├── requirements.txt       # Danh sách thư viện phụ thuộc
-├── templates/
-│   └── index.html         # Giao diện Web Dashboard (Radar 2D & AR HUD)
-└── static/
-    ├── style.css          # CSS Glassmorphism Dark Mode
-    └── app.js             # Client Web Speech API, Radar Canvas & Webcam Stream
-```
+- ✅ Kiểm tra định nghĩa 15 lớp và dữ liệu vật lý
+- ✅ Kiểm tra công thức Pinhole Camera và phân vùng 3D (Trái, Phía trước, Phải)
+- ✅ Kiểm tra cơ chế chống lặp từ và phát âm thanh tiếng Việt
+- ✅ Kiểm tra mô hình YOLOv8n và vẽ AR HUD
+- ✅ Kiểm tra toàn bộ REST API endpoints của FastAPI Web Server

@@ -5,7 +5,7 @@ Runs real-time indoor obstacle detection, distance estimation, and voice warning
 Controls:
 - 'q' or 'ESC': Quit
 - 'm': Toggle Mute / Unmute voice alerts
-- 's': Save screenshot snapshot
+- 's': Save screenshot snapshot to data/outputs/
 - '+': Increase Focal Length (Calibrate distance)
 - '-': Decrease Focal Length
 """
@@ -13,17 +13,22 @@ Controls:
 import sys
 import time
 import argparse
+from pathlib import Path
 import cv2
 import numpy as np
 
-from config import DEFAULT_FOCAL_LENGTH
-from detector import IndoorDetector
-from alert_system import AlertManager
+# Add project root to sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.config import DEFAULT_FOCAL_LENGTH, DEFAULT_MODEL_PATH, DATA_DIR
+from src.core.detector import IndoorDetector
+from src.services.alert_manager import AlertManager
 
 def main():
     parser = argparse.ArgumentParser(description="Second Eye - Desktop CV Application")
-    parser.add_argument("--source", type=str, default="0", help="Camera index (0, 1) or path to video file")
-    parser.add_argument("--model", type=str, default="yolov8n.pt", help="YOLO model path/name")
+    parser.add_argument("--source", type=str, default="0", help="Camera index (0, 1) or path/URL to video stream")
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL_PATH, help="YOLO model path/name")
     parser.add_argument("--conf", type=float, default=0.35, help="Confidence threshold")
     parser.add_argument("--focal", type=float, default=DEFAULT_FOCAL_LENGTH, help="Initial camera focal length")
     parser.add_argument("--no-audio", action="store_true", help="Disable local speech synthesis")
@@ -57,6 +62,10 @@ def main():
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         print(f"[Error] Không thể mở nguồn video/camera: {source}")
+        print("\n💡 Gợi ý:")
+        print("  - Nếu dùng camera MacBook: Hãy kiểm tra quyền Camera trong System Settings -> Privacy & Security -> Camera.")
+        print("  - Nếu dùng iPhone qua Continuity: Thử chạy với --source 1")
+        print("  - Nếu dùng IP Webcam: Nhập URL dạng: --source http://<IP>:8080/video")
         sys.exit(1)
 
     # Set camera resolution
@@ -67,6 +76,8 @@ def main():
     fps = 30.0
     is_muted = False
     current_focal = args.focal
+    outputs_dir = DATA_DIR / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         while True:
@@ -107,7 +118,7 @@ def main():
                 alert_mgr.mute(is_muted)
                 print(f"[Audio] Trạng thái âm thanh: {'MUTED (Tắt tiếng)' if is_muted else 'UNMUTED (Bật tiếng)'}")
             elif key == ord('s') or key == ord('S'):
-                filename = f"snapshot_{int(time.time())}.jpg"
+                filename = str(outputs_dir / f"snapshot_{int(time.time())}.jpg")
                 cv2.imwrite(filename, annotated_frame)
                 print(f"[Saved] Đã lưu ảnh chụp: {filename}")
             elif key == ord('+') or key == ord('='):

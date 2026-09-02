@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional
 import numpy as np
 
-from config import (
+from src.config import (
     INDOOR_CLASSES,
     DIST_DANGER_THRESHOLD,
     DIST_WARNING_THRESHOLD,

@@ -1,7 +1,8 @@
 {
     "python.defaultInterpreterPath": "/opt/anaconda3/envs/ai-macbook/bin/python3",
     "python.analysis.extraPaths": [
-        "/opt/anaconda3/envs/ai-macbook/lib/python3.10/site-packages",
-        "."
+        ".",
+        "src",
+        "/opt/anaconda3/envs/ai-macbook/lib/python3.10/site-packages"
     ]
 }

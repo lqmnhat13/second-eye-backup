@@ -1,13 +1,25 @@
 """
 Demo script to run Second Eye AI pipeline on static sample images.
+Saves annotated visual HUD and generates Vietnamese voice alerts.
 """
 
 import os
+import sys
+from pathlib import Path
 import cv2
-from detector import IndoorDetector
-from alert_system import AlertManager
 
-def run_demo(image_path: str = "samples/indoor_demo.jpg", output_path: str = "test_outputs/annotated_demo.jpg"):
+# Add project root to sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.config import DATA_DIR, DEFAULT_MODEL_PATH
+from src.core.detector import IndoorDetector
+from src.services.alert_manager import AlertManager
+
+def run_demo(
+    image_path: str = str(DATA_DIR / "samples" / "indoor_demo.jpg"),
+    output_path: str = str(DATA_DIR / "outputs" / "annotated_demo.jpg")
+):
     if not os.path.exists(image_path):
         print(f"[Error] File not found: {image_path}")
         return
@@ -20,7 +32,7 @@ def run_demo(image_path: str = "samples/indoor_demo.jpg", output_path: str = "te
     h, w = frame.shape[:2]
     print(f"Loaded image: {image_path} ({w}x{h} px)")
 
-    detector = IndoorDetector(model_name="yolov8n.pt", conf_threshold=0.30, focal_length=650.0)
+    detector = IndoorDetector(model_name=DEFAULT_MODEL_PATH, conf_threshold=0.30, focal_length=650.0)
     alert_mgr = AlertManager(enable_local_audio=False)
 
     # 1. Detect objects & estimate metric distances
@@ -42,11 +54,6 @@ def run_demo(image_path: str = "samples/indoor_demo.jpg", output_path: str = "te
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     cv2.imwrite(output_path, annotated)
     print(f"\nSaved annotated result to: {output_path}")
-
-    # Copy to artifact folder for report embedding
-    artifact_output = "/Users/lenhat/.gemini/antigravity-ide/brain/c2718bf1-664a-483b-923f-b36cbaffd3db/annotated_demo.jpg"
-    cv2.imwrite(artifact_output, annotated)
-    print(f"Copied to artifact directory: {artifact_output}")
 
     alert_mgr.stop()
 

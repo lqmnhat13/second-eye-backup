@@ -13,14 +13,14 @@ import sys
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 
-from config import (
+from src.config import (
     ALERT_REPEAT_COOLDOWN,
     DANGER_REPEAT_COOLDOWN,
     GLOBAL_ALERT_COOLDOWN,
     INDOOR_CLASSES
 )
-from distance_estimator import DetectedObject
-from audio_service import audio_service
+from src.core.distance_estimator import DetectedObject
+from src.services.audio_service import audio_service
 
 @dataclass
 class AlertMessage:
@@ -103,7 +103,7 @@ class AlertManager:
         current_time = time.time()
         is_danger = (obj.risk_level == "DANGER")
 
-        # 1. Global Cooldown (Minimum 4.5s of absolute silence between any alerts)
+        # 1. Global Cooldown (Minimum silence between any alerts)
         global_cooldown = DANGER_REPEAT_COOLDOWN if is_danger else GLOBAL_ALERT_COOLDOWN
         if (current_time - self.global_last_alert_time) < global_cooldown:
             return False

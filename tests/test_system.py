@@ -6,8 +6,13 @@ YOLO model inference, HUD rendering, and Vietnamese voice alert generation.
 
 import os
 import sys
+from pathlib import Path
 import numpy as np
 import cv2
+
+# Add project root to sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 def run_tests():
     print("=" * 60)
@@ -16,7 +21,7 @@ def run_tests():
 
     # 1. Test Config & 15 Indoor Classes
     print("\n[Test 1/5] Verifying 15 Indoor Classes & Config...")
-    from config import INDOOR_CLASSES, COCO_TO_INDOOR_MAP, DEFAULT_FOCAL_LENGTH
+    from src.config import INDOOR_CLASSES, COCO_TO_INDOOR_MAP, DEFAULT_FOCAL_LENGTH, DATA_DIR, DEFAULT_MODEL_PATH
     assert len(INDOOR_CLASSES) == 15, f"Expected 15 indoor classes, found {len(INDOOR_CLASSES)}"
     for key, info in INDOOR_CLASSES.items():
         assert info.real_height > 0, f"Class {key} has invalid real_height"
@@ -28,7 +33,7 @@ def run_tests():
 
     # 2. Test Distance Estimator & Spatial Math
     print("\n[Test 2/5] Verifying Distance Estimator & Spatial Zones...")
-    from distance_estimator import DistanceEstimator
+    from src.core.distance_estimator import DistanceEstimator
     estimator = DistanceEstimator(focal_length=650.0)
 
     # Test Distance calculation:
@@ -58,7 +63,7 @@ def run_tests():
 
     # 3. Test Alert Manager & Vietnamese Speech Formatting
     print("\n[Test 3/5] Verifying Alert Manager & Vietnamese Speech Engine...")
-    from alert_system import AlertManager, format_distance_vi
+    from src.services.alert_manager import AlertManager, format_distance_vi
     alert_mgr = AlertManager(enable_local_audio=False) # audio off for headless test
 
     assert format_distance_vi(0.8) == "không phẩy tám mét"
@@ -67,7 +72,7 @@ def run_tests():
     assert format_distance_vi(2.3) == "2 phẩy ba mét"
     print("  -> Vietnamese Distance Speech formatting validated - OK")
 
-    # Test DANGER Alert Phrase (critical close proximity: bbox height 450px on 480p -> ~0.94m)
+    # Test DANGER Alert Phrase
     danger_obj = estimator.process_detection("stairs", 0.9, (200, 20, 440, 470), (480, 640))
     phrase_danger = alert_mgr.build_alert_phrase(danger_obj)
     print(f"  -> Generated DANGER Alert Phrase: \"{phrase_danger}\"")
@@ -85,29 +90,28 @@ def run_tests():
 
     # 4. Test YOLO Detector on Synthetic Indoor Scene
     print("\n[Test 4/5] Verifying IndoorDetector & YOLO Inference...")
-    from detector import IndoorDetector
-    detector = IndoorDetector(model_name="yolov8n.pt", conf_threshold=0.25)
+    from src.core.detector import IndoorDetector
+    detector = IndoorDetector(model_name=DEFAULT_MODEL_PATH, conf_threshold=0.25)
     
-    # Create synthetic test frame with simulated indoor shapes
     synthetic_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    # Background floor & wall
     synthetic_frame[:240, :] = [40, 40, 45]
     synthetic_frame[240:, :] = [70, 70, 75]
     
-    # Run detector
     detections = detector.detect(synthetic_frame)
     print(f"  -> Detection pipeline ran cleanly on frame without errors (Detections count: {len(detections)})")
 
     # Test HUD drawing
     annotated = detector.draw_hud(synthetic_frame, [danger_obj, warning_obj], fps=45.2)
     assert annotated.shape == synthetic_frame.shape
-    os.makedirs("test_outputs", exist_ok=True)
-    cv2.imwrite("test_outputs/annotated_hud_test.jpg", annotated)
-    print("  -> HUD Annotation rendered and saved to 'test_outputs/annotated_hud_test.jpg'")
+    outputs_dir = DATA_DIR / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    test_out_img = str(outputs_dir / "annotated_hud_test.jpg")
+    cv2.imwrite(test_out_img, annotated)
+    print(f"  -> HUD Annotation rendered and saved to '{test_out_img}'")
 
     # 5. Test Web App Endpoint Readiness
     print("\n[Test 5/5] Verifying Web App & API Endpoints...")
-    from web_app import app
+    from src.web.app import app
     from fastapi.testclient import TestClient
     client = TestClient(app)
 
@@ -121,6 +125,10 @@ def run_tests():
     assert len(classes_json["classes"]) == 15
     print(f"  -> GET /api/classes returned {len(classes_json['classes'])} classes: OK")
 
+    res_health = client.get("/api/health")
+    assert res_health.status_code == 200
+    print("  -> GET /api/health status: 200 OK")
+
     # Test /api/detect_frame with a blank image
     import base64
     _, buffer = cv2.imencode('.jpg', synthetic_frame)
@@ -129,7 +137,7 @@ def run_tests():
     assert res_detect.status_code == 200
     detect_json = res_detect.json()
     assert detect_json["status"] == "success"
-    print(f"  -> POST /api/detect_frame status: 200 OK | Inference Latency: {detect_json['inference_ms']}ms | FPS: {detect_json['fps']}")
+    print(f"  -> POST /api/detect_frame status: 200 OK | Latency: {detect_json['inference_ms']}ms | FPS: {detect_json['fps']}")
 
     alert_mgr.stop()
     print("\n" + "=" * 60)

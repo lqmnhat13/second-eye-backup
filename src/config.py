@@ -1,11 +1,20 @@
 """
 Configuration for Second Eye - Visually Impaired Indoor Assistance System.
 Includes class definitions for 15 indoor objects, physical dimensions,
-distance thresholds, and alert priority mapping.
+distance thresholds, alert priority mapping, and project paths.
 """
 
+import os
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, Tuple
+
+# Project Directories
+SRC_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SRC_DIR.parent
+MODELS_DIR = PROJECT_ROOT / "models"
+DATA_DIR = PROJECT_ROOT / "data"
+DEFAULT_MODEL_PATH = str(MODELS_DIR / "yolov8n.pt")
 
 @dataclass
 class ObjectClassInfo:

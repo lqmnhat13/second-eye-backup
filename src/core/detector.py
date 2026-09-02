@@ -4,21 +4,23 @@ Wraps YOLO model and maps raw detections to 15 prioritized indoor classes,
 combining object bounding boxes with metric distance estimation and HUD rendering.
 """
 
+import os
 import cv2
 import numpy as np
 import torch
 from typing import List, Tuple, Dict, Optional
 from ultralytics import YOLO
 
-from config import (
+from src.config import (
     INDOOR_CLASSES,
     COCO_TO_INDOOR_MAP,
     COLOR_DANGER,
     COLOR_WARNING,
     COLOR_SAFE,
-    DEFAULT_FOCAL_LENGTH
+    DEFAULT_FOCAL_LENGTH,
+    DEFAULT_MODEL_PATH
 )
-from distance_estimator import DistanceEstimator, DetectedObject
+from src.core.distance_estimator import DistanceEstimator, DetectedObject
 
 def remove_accents_vi(text: str) -> str:
     """Helper to convert Vietnamese accents to ASCII for OpenCV putText."""
@@ -30,7 +32,7 @@ def remove_accents_vi(text: str) -> str:
 class IndoorDetector:
     def __init__(
         self,
-        model_name: str = "yolov8n.pt",
+        model_name: Optional[str] = None,
         conf_threshold: float = 0.35,
         iou_threshold: float = 0.45,
         focal_length: float = DEFAULT_FOCAL_LENGTH,
@@ -38,12 +40,18 @@ class IndoorDetector:
     ):
         """
         Initialize Indoor Detector.
-        :param model_name: YOLO model weights (e.g., 'yolov8n.pt' or 'yolo11n.pt')
+        :param model_name: YOLO model weights (default: 'models/yolov8n.pt' or fallback to 'yolov8n.pt')
         :param conf_threshold: Confidence threshold [0.0 - 1.0]
         :param iou_threshold: IOU threshold for NMS
         :param focal_length: Initial focal length in pixels
         :param device: 'mps', 'cuda', or 'cpu' (auto-detected if None)
         """
+        if model_name is None:
+            if os.path.exists(DEFAULT_MODEL_PATH):
+                model_name = DEFAULT_MODEL_PATH
+            else:
+                model_name = "yolov8n.pt"
+
         if device is None:
             if torch.backends.mps.is_available():
                 self.device = "mps"
