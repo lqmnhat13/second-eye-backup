@@ -1,0 +1,12 @@
+{
+  "venvPath": "/opt/anaconda3/envs",
+  "venv": "ai-macbook",
+  "include": [
+    "."
+  ],
+  "extraPaths": [
+    "/opt/anaconda3/envs/ai-macbook/lib/python3.10/site-packages",
+    "."
+  ],
+  "reportMissingImports": "warning"
+}
