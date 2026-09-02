@@ -8,7 +8,7 @@ import os
 import cv2
 import numpy as np
 import torch
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Any
 from ultralytics import YOLO
 
 from src.config import (
@@ -92,7 +92,7 @@ class IndoorDetector:
         frame_h, frame_w = frame.shape[:2]
         
         # Inference with YOLO
-        results = self.model.predict(
+        results: Any = self.model.predict(
             source=frame,
             conf=self.conf_threshold,
             iou=self.iou_threshold,
@@ -102,11 +102,11 @@ class IndoorDetector:
 
         detected_objects: List[DetectedObject] = []
 
-        if not results or len(results) == 0:
+        if not results:
             return detected_objects
 
         result = results[0]
-        boxes = result.boxes
+        boxes = getattr(result, "boxes", None)
 
         if boxes is None or len(boxes) == 0:
             return detected_objects
