@@ -42,9 +42,15 @@ venv.bak/
 *.swp
 *.swo
 
+# SSL Certificates
+*.pem
+key.pem
+cert.pem
+
 # Audio cache / Temporary output
 static/audio_cache/*.mp3
 !static/audio_cache/.gitkeep
 test_outputs/*.jpg
 test_outputs/*.mp3
 !test_outputs/.gitkeep
+

@@ -170,16 +170,46 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             alertAudio.load();
 
-            const constraints = {
-                video: {
-                    facingMode: state.facingMode,
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                },
-                audio: false
-            };
+            // Check browser MediaDevices API support (often blocked on non-localhost HTTP)
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+                if (!isLocal && location.protocol !== "https:") {
+                    alert(
+                        "⚠️ TRÌNH DUYỆT YÊU CẦU HTTPS KHI DÙNG CAMERA TRÊN ĐIỆN THOẠI:\n\n" +
+                        "Trình duyệt di động (iOS Safari / Android Chrome) bắt buộc sử dụng HTTPS để cấp quyền camera.\n\n" +
+                        "👉 Cách khắc phục:\n" +
+                        "1. Truy cập bằng đường dẫn HTTPS: https://" + location.hostname + ":" + location.port + "\n" +
+                        "   (Sau đó bấm 'Nâng cao' / 'Advanced' -> 'Tiếp tục truy cập' / 'Proceed')\n" +
+                        "2. Hoặc nếu dùng trên máy tính: mở http://localhost:" + location.port
+                    );
+                    return;
+                } else {
+                    alert("Trình duyệt của bạn không hỗ trợ hoặc đang chặn MediaDevices API.");
+                    return;
+                }
+            }
 
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            let stream = null;
+            // First attempt: try requested facingMode with ideal constraint (non-strict so laptops won't fail)
+            try {
+                const constraints = {
+                    video: {
+                        facingMode: state.facingMode ? { ideal: state.facingMode } : undefined,
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    },
+                    audio: false
+                };
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (constraintErr) {
+                console.warn("[Second Eye] Retrying with generic video constraints:", constraintErr);
+                // Fallback attempt: request any available video camera
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: false
+                });
+            }
+
             video.srcObject = stream;
             
             video.onloadedmetadata = () => {
@@ -202,7 +232,17 @@ document.addEventListener("DOMContentLoaded", () => {
             requestAnimationFrame(processFrameLoop);
         } catch (err) {
             console.error("Camera access error:", err);
-            alert("Không thể truy cập camera. Vui lòng cấp quyền truy cập webcam trong trình duyệt.");
+            let userMsg = "Không thể mở camera (" + (err.name || "Lỗi") + ").";
+            if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+                userMsg = "Trình duyệt chưa được cấp quyền Camera.\n\n👉 Vui lòng bấm vào biểu tượng Ổ khóa hoặc Cài đặt trang web trên thanh địa chỉ và chọn 'Cho phép' (Allow) Camera.";
+            } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+                userMsg = "Không tìm thấy thiết bị camera nào trên máy.";
+            } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
+                userMsg = "Camera đang bị một ứng dụng khác (FaceTime, Zoom, Meet, ...) sử dụng. Vui lòng đóng ứng dụng đó và thử lại.";
+            } else if (err.name === "OverconstrainedError") {
+                userMsg = "Độ phân giải hoặc chế độ camera không được hỗ trợ trên thiết bị này.";
+            }
+            alert(userMsg);
         }
     }
 

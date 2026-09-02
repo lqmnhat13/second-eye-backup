@@ -185,6 +185,31 @@ async def get_alerts_log():
     """Fetch recent alert history."""
     return {"log": alert_manager.alert_log}
 
+def get_local_ip() -> str:
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return '127.0.0.1'
+
+def ensure_ssl_certs():
+    if not (os.path.exists("cert.pem") and os.path.exists("key.pem")):
+        import subprocess
+        try:
+            print("[SSL] Đang tạo chứng chỉ SSL bảo mật cho kết nối Camera di động...")
+            subprocess.run([
+                "openssl", "req", "-x509", "-newkey", "rsa:2048",
+                "-keyout", "key.pem", "-out", "cert.pem",
+                "-days", "365", "-nodes", "-subj", "/CN=SecondEye"
+            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print("[SSL] Đã tạo chứng chỉ SSL cert.pem & key.pem thành công.")
+        except Exception as e:
+            print(f"[SSL Error] Không thể tạo chứng chỉ tự động: {e}")
+
 def find_free_port(start_port: int = 8000) -> int:
     import socket
     port = start_port
@@ -203,11 +228,40 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     parser.add_argument("--port", type=int, default=8000, help="Port number")
     parser.add_argument("--auto-port", action="store_true", help="Auto-select free port if occupied")
+    parser.add_argument("--ssl", action="store_true", default=True, help="Enable HTTPS (Required for phone camera)")
+    parser.add_argument("--no-ssl", action="store_false", dest="ssl", help="Disable HTTPS and run plain HTTP")
     args = parser.parse_args()
 
     target_port = args.port
     if args.auto_port:
         target_port = find_free_port(args.port)
 
-    print(f"\n[Second Eye] Máy chủ đang chạy tại: http://localhost:{target_port}")
-    uvicorn.run("web_app:app", host=args.host, port=target_port, reload=True)
+    local_ip = get_local_ip()
+    use_ssl = args.ssl
+
+    if use_ssl:
+        ensure_ssl_certs()
+        if not (os.path.exists("cert.pem") and os.path.exists("key.pem")):
+            print("[Warning] Không tìm thấy cert.pem / key.pem, chuyển về chế độ HTTP thông thường.")
+            use_ssl = False
+
+    proto = "https" if use_ssl else "http"
+    print("\n" + "=" * 70)
+    print("      SECOND EYE - HỆ THỐNG TRỢ LÝ THỊ GIÁC CHO NGƯỜI KHIẾM THỊ")
+    print("=" * 70)
+    print(f"💻 MÁY TÍNH:   {proto}://localhost:{target_port}")
+    print(f"📱 ĐIỆN THOẠI: {proto}://{local_ip}:{target_port}")
+    print("-" * 70)
+    if use_ssl:
+        print("📌 LƯU Ý KHI MỞ TRÊN ĐIỆN THOẠI (iOS Safari / Android Chrome):")
+        print("   Vì dùng chứng chỉ bảo mật nội bộ, trình duyệt sẽ hỏi xác nhận 1 lần:")
+        print("   -> Bấm 'Nâng cao' (Advanced) -> Chọn 'Tiếp tục truy cập' (Proceed).")
+        print("   -> Sau đó bấm 'Bật Camera' để cấp quyền sử dụng camera điện thoại.")
+    print("=" * 70 + "\n")
+
+    if use_ssl:
+        uvicorn.run("web_app:app", host=args.host, port=target_port,
+                    ssl_keyfile="key.pem", ssl_certfile="cert.pem", reload=True)
+    else:
+        uvicorn.run("web_app:app", host=args.host, port=target_port, reload=True)
+
