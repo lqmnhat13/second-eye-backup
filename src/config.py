@@ -227,9 +227,9 @@ ZONE_LEFT_MAX = 0.35            # 0.00 - 0.35: "Bên trái"
 ZONE_CENTER_MAX = 0.65          # 0.35 - 0.65: "Phía trước"
                                 # 0.65 - 1.00: "Bên phải"
 
-# Camera Calibration Default Parameters
-DEFAULT_FOCAL_LENGTH = 650.0    # Standard webcam focal length in pixels (for 640x480)
-DEFAULT_CAMERA_HEIGHT = 1.2     # Handheld / Chest-mounted camera height (meters)
+# Camera Calibration Default Parameters (Focal length 500.0px for 70° FOV at 640x480)
+DEFAULT_FOCAL_LENGTH = 500.0    # Optimized for MacBook FaceTime HD & standard 70° FOV webcams
+DEFAULT_CAMERA_HEIGHT = 1.0     # Handheld / Chest / Desk mounted camera height in meters
 
 # Alert Cooldowns (seconds) - Chống đọc liên tục dồn dập
 GLOBAL_ALERT_COOLDOWN = 4.0     # Khoảng nghỉ tối thiểu giữa 2 lần phát giọng nói bất kỳ

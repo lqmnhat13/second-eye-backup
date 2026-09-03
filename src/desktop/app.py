@@ -269,6 +269,9 @@ class SecondEyeDesktopApp:
             conf_threshold=0.35,
             focal_length=self.focal_length
         )
+        # Synchronize focal length with saved calibration if present
+        self.focal_length = self.detector.distance_estimator.focal_length
+
         self.alert_manager = AlertManager(enable_local_audio=True)
         self.ocr_reader = OCRReader(gpu=False)
         self.inference_worker = InferenceWorker(self.detector, self.alert_manager)
@@ -475,7 +478,12 @@ class SecondEyeDesktopApp:
         focal_box = tk.Frame(toolbar, bg="#111a2e")
         focal_box.pack(side="right")
 
-        tk.Label(focal_box, text="Tiêu cự:", font=("Arial", 9), fg="#94a3b8", bg="#111a2e").pack(side="left", padx=3)
+        PillButton(
+            focal_box, text="🎯 Hiệu Chuẩn", command=self.open_calibration_dialog,
+            bg="#0284c7", fg="#ffffff", hover_bg="#0369a1", font=("Arial", 8, "bold"), padx=8, pady=2
+        ).pack(side="left", padx=(0, 6))
+
+        tk.Label(focal_box, text="Tiêu cự:", font=("Arial", 9), fg="#94a3b8", bg="#111a2e").pack(side="left", padx=2)
 
         PillButton(
             focal_box, text="-", command=lambda: self.adjust_focal_length(-25),
@@ -882,6 +890,100 @@ class SecondEyeDesktopApp:
             self.scan_and_read_ocr()
         else:
             self.toggle_camera()
+
+    def open_calibration_dialog(self):
+        """Open an interactive camera calibration wizard dialog."""
+        cal_win = tk.Toplevel(self.root)
+        cal_win.title("🎯 Hiệu Chuẩn Khoảng Cách & Camera")
+        cal_win.geometry("520x460")
+        cal_win.configure(bg="#0d1424")
+        cal_win.transient(self.root)
+        cal_win.grab_set()
+
+        # Header
+        hdr = tk.Frame(cal_win, bg="#111a2e", padx=16, pady=12)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="🎯 HIỆU CHUẨN ĐO KHOẢNG CÁCH CHÍNH XÁC", font=("Arial", 11, "bold"), fg="#38bdf8", bg="#111a2e").pack(anchor="w")
+        tk.Label(hdr, text="Tự động đồng bộ cự ly mét chuẩn theo từng loại camera và góc nhìn thực tế", font=("Arial", 8), fg="#94a3b8", bg="#111a2e").pack(anchor="w")
+
+        body = tk.Frame(cal_win, bg="#0d1424", padx=16, pady=12)
+        body.pack(fill="both", expand=True)
+
+        # 1. Preset Cameras
+        tk.Label(body, text="1. Chọn Cấu Hình Camera Có Sẵn:", font=("Arial", 9, "bold"), fg="#e2e8f0", bg="#0d1424").pack(anchor="w", pady=(0, 4))
+        preset_box = tk.Frame(body, bg="#0d1424")
+        preset_box.pack(fill="x", pady=(0, 12))
+
+        lbl_status = tk.Label(body, text=f"Tiêu cự hiện tại: {self.focal_length:.0f}px", font=("Arial", 8, "italic"), fg="#38bdf8", bg="#0d1424")
+
+        def apply_preset(val: float, name: str):
+            diff = val - self.focal_length
+            self.adjust_focal_length(diff)
+            scale_focal.set(int(val))
+            lbl_status.config(text=f"✓ Đã áp dụng cấu hình: {name} ({val:.0f}px)", fg="#10b981")
+            if self.voice_enabled:
+                audio_service.speak_local(f"Đã chọn cấu hình {name}", interrupt=True)
+
+        PillButton(preset_box, text="💻 MacBook (480px)", command=lambda: apply_preset(480.0, "MacBook"),
+                   bg="#1e293b", fg="#ffffff", hover_bg="#334155", font=("Arial", 8, "bold"), padx=8, pady=4).pack(side="left", padx=2)
+        PillButton(preset_box, text="📷 USB Webcam (600px)", command=lambda: apply_preset(600.0, "Webcam rời"),
+                   bg="#1e293b", fg="#ffffff", hover_bg="#334155", font=("Arial", 8, "bold"), padx=8, pady=4).pack(side="left", padx=2)
+        PillButton(preset_box, text="📱 iPhone Cam (420px)", command=lambda: apply_preset(420.0, "iPhone"),
+                   bg="#1e293b", fg="#ffffff", hover_bg="#334155", font=("Arial", 8, "bold"), padx=8, pady=4).pack(side="left", padx=2)
+
+        # 2. 1-Click Auto Calibration at 1.0m
+        tk.Label(body, text="2. Tự Động Căn Chỉnh Theo Mốc 1.0 Mét (Khuyên dùng):", font=("Arial", 9, "bold"), fg="#e2e8f0", bg="#0d1424").pack(anchor="w", pady=(0, 4))
+        tk.Label(body, text="Hãy đứng trước camera cách đúng 1.0 mét (hoặc nhờ 1 người đứng cách 1.0m), sau đó bấm nút:", font=("Arial", 8), fg="#94a3b8", bg="#0d1424", wraplength=480, justify="left").pack(anchor="w", pady=(0, 6))
+
+        def auto_calibrate_1m():
+            dets = self.current_detections
+            if not dets:
+                lbl_status.config(text="⚠️ Chưa thấy vật cản nào! Hãy đứng trước camera trong khung hình.", fg="#f59e0b")
+                return
+
+            target = dets[0]
+            bbox_h = max(1, target.bbox[3] - target.bbox[1])
+            info = INDOOR_CLASSES.get(target.class_key)
+            real_h = info.real_height if info else 1.0
+            if target.class_key == "person":
+                ar = bbox_h / max(1, target.bbox[2] - target.bbox[0])
+                real_h = 0.88 if ar < 1.9 else 1.65
+
+            new_f = self.detector.distance_estimator.calibrate_with_known_distance(1.0, bbox_h, real_h)
+            if new_f:
+                diff = new_f - self.focal_length
+                self.adjust_focal_length(diff)
+                scale_focal.set(int(new_f))
+                lbl_status.config(text=f"✓ Đã hiệu chuẩn thành công theo {target.name_vi}: Tiêu cự = {new_f:.0f}px (Lưu vĩnh viễn)", fg="#10b981")
+                if self.voice_enabled:
+                    audio_service.speak_local("Đã hiệu chuẩn cự ly 1 mét thành công.", interrupt=True)
+
+        PillButton(body, text="🎯 LẤY MỐC 1.0 MÉT & TỰ ĐỘNG TÍNH TIÊU CỰ", command=auto_calibrate_1m,
+                   bg="#059669", fg="#ffffff", hover_bg="#047857", font=("Arial", 9, "bold"), padx=12, pady=6).pack(anchor="w", pady=(0, 10))
+
+        # 3. Fine tuning slider
+        tk.Label(body, text="3. Tinh Chỉnh Thủ Công Bằng Thanh Trượt:", font=("Arial", 9, "bold"), fg="#e2e8f0", bg="#0d1424").pack(anchor="w", pady=(0, 4))
+        slider_frame = tk.Frame(body, bg="#0d1424")
+        slider_frame.pack(fill="x", pady=(0, 6))
+
+        scale_focal = tk.Scale(slider_frame, from_=250, to=900, orient="horizontal", bg="#111a2e", fg="#38bdf8",
+                               highlightthickness=0, troughcolor="#1e293b")
+        scale_focal.set(int(self.focal_length))
+        scale_focal.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        def on_slider(val):
+            v = float(val)
+            diff = v - self.focal_length
+            if abs(diff) >= 1.0:
+                self.adjust_focal_length(diff)
+                lbl_status.config(text=f"Tiêu cự hiện tại: {self.focal_length:.0f}px", fg="#38bdf8")
+
+        scale_focal.config(command=on_slider)
+        lbl_status.pack(anchor="w", pady=4)
+
+        # Close button
+        PillButton(cal_win, text="Đóng", command=cal_win.destroy,
+                   bg="#334155", fg="#ffffff", hover_bg="#475569", font=("Arial", 9), padx=14, pady=4).pack(side="bottom", pady=8)
 
     def adjust_focal_length(self, delta: float):
         self.focal_length = max(100.0, self.focal_length + delta)

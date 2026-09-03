@@ -70,8 +70,8 @@ class IndoorDetector:
         self.enabled_classes = set(INDOOR_CLASSES.keys())
 
     def set_focal_length(self, f: float):
-        """Update focal length for distance estimation."""
-        self.distance_estimator.update_focal_length(f)
+        """Update focal length for distance estimation and persist configuration."""
+        self.distance_estimator.update_focal_length(f, save=True)
 
     def toggle_class(self, class_key: str, enabled: bool):
         """Enable or disable specific class detection."""
