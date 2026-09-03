@@ -157,6 +157,21 @@ class AlertManager:
         priority = 1 if top_obj.risk_level == "DANGER" else 2
         now = time.time()
 
+        alert_msg = AlertMessage(
+            text_vi=phrase,
+            risk_level=top_obj.risk_level,
+            class_key=top_obj.class_key,
+            distance=top_obj.distance,
+            direction_vi=top_obj.direction_vi,
+            priority=priority,
+            timestamp=now,
+            audio_base64=audio_b64
+        )
+
+        # Enqueue for local offline speech synthesis
+        if self.enable_local_audio and not self.is_muted:
+            self.alert_queue.put((priority, now, alert_msg))
+
         alert_dict = {
             "text_vi": phrase,
             "risk_level": top_obj.risk_level,
@@ -174,8 +189,15 @@ class AlertManager:
 
         return [alert_dict]
 
+    def set_local_audio(self, enabled: bool):
+        """Enable or disable local speech audio output."""
+        self.enable_local_audio = enabled
+        if enabled and (not hasattr(self, "worker_thread") or not self.worker_thread.is_alive()):
+            self.worker_thread = threading.Thread(target=self._speech_worker, daemon=True)
+            self.worker_thread.start()
+
     def _speech_worker(self):
-        """Background thread executing speech alerts smoothly for CLI."""
+        """Background thread executing speech alerts smoothly for Desktop / CLI."""
         while self.running:
             try:
                 item = self.alert_queue.get(timeout=0.5)
@@ -187,7 +209,8 @@ class AlertManager:
                     continue
 
                 if not self.is_muted and self.enable_local_audio:
-                    self._speak_local(alert.text_vi)
+                    # Speak with Linh/macOS local voice
+                    self._speak_local(alert.text_vi, is_danger=(priority == 1))
 
                 self.last_spoken_text = alert.text_vi
                 self.alert_queue.task_done()
@@ -197,21 +220,14 @@ class AlertManager:
             except Exception:
                 time.sleep(0.1)
 
-    def _speak_local(self, text: str):
+    def _speak_local(self, text: str, is_danger: bool = False):
         """Invoke local OS speech engine with Vietnamese voice specifically."""
         try:
-            if sys.platform == "darwin":
-                # Explicitly use macOS Vietnamese voice 'Linh'
-                subprocess.run(["say", "-v", "Linh", "-r", str(self.voice_speed), text], check=False)
-            else:
-                import pyttsx3
-                engine = pyttsx3.init()
-                engine.setProperty("rate", self.voice_speed)
-                engine.say(text)
-                engine.runAndWait()
+            audio_service.speak_local(text, voice_rate=self.voice_speed, interrupt=is_danger)
         except Exception:
             pass
 
     def stop(self):
         """Stop alert worker thread."""
         self.running = False
+        audio_service.stop_speech()

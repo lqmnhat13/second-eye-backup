@@ -48,8 +48,8 @@ key.pem
 cert.pem
 
 # Audio cache / Temporary output
-src/web/static/audio_cache/*.mp3
-!src/web/static/audio_cache/.gitkeep
+data/audio_cache/*.mp3
+!data/audio_cache/.gitkeep
 data/outputs/*.jpg
 data/outputs/*.mp3
 !data/outputs/.gitkeep

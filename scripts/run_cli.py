@@ -131,11 +131,13 @@ def main():
                     for idx, p in enumerate(ocr_res.paragraphs, 1):
                         print(f"  {idx}. {p}")
                     print("-" * 50)
-                    # Speak out loud
-                    alert_mgr._speak_local(ocr_res.full_text)
+                    # Speak out loud using local voice
+                    from src.services.audio_service import audio_service
+                    audio_service.speak_local(ocr_res.full_text)
                 else:
                     print("[OCR] Không tìm thấy văn bản rõ ràng trong khung hình.")
-                    alert_mgr._speak_local("Không tìm thấy văn bản rõ ràng.")
+                    from src.services.audio_service import audio_service
+                    audio_service.speak_local("Không tìm thấy văn bản rõ ràng.")
             elif key == ord('+') or key == ord('='):
                 current_focal += 25.0
                 detector.set_focal_length(current_focal)

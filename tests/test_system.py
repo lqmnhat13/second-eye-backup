@@ -109,35 +109,24 @@ def run_tests():
     cv2.imwrite(test_out_img, annotated)
     print(f"  -> HUD Annotation rendered and saved to '{test_out_img}'")
 
-    # 5. Test Web App Endpoint Readiness
-    print("\n[Test 5/5] Verifying Web App & API Endpoints...")
-    from src.web.app import app
-    from fastapi.testclient import TestClient
-    client = TestClient(app)
+    # 5. Test 2D Radar & Desktop App Components
+    print("\n[Test 5/6] Verifying 2D Spatial Radar & Desktop Integration...")
+    import tkinter as tk
+    from src.desktop.radar_canvas import RadarWidget
+    from src.desktop.app import SecondEyeDesktopApp
 
-    res_home = client.get("/")
-    assert res_home.status_code == 200, f"GET / failed with {res_home.status_code}"
-    print("  -> GET / (Dashboard UI HTML) status: 200 OK")
+    test_root = tk.Tk()
+    test_root.withdraw()
+    radar = RadarWidget(test_root, width=420, height=210)
+    radar.update_objects([danger_obj, warning_obj])
+    assert len(radar.find_all()) > 0, "Radar canvas should have drawn graphical elements"
+    print(f"  -> 2D Radar rendered {len(radar.find_all())} graphical objects: OK")
 
-    res_classes = client.get("/api/classes")
-    assert res_classes.status_code == 200
-    classes_json = res_classes.json()
-    assert len(classes_json["classes"]) == 15
-    print(f"  -> GET /api/classes returned {len(classes_json['classes'])} classes: OK")
-
-    res_health = client.get("/api/health")
-    assert res_health.status_code == 200
-    print("  -> GET /api/health status: 200 OK")
-
-    # Test /api/detect_frame with a blank image
-    import base64
-    _, buffer = cv2.imencode('.jpg', synthetic_frame)
-    b64_str = "data:image/jpeg;base64," + base64.b64encode(buffer).decode('utf-8')
-    res_detect = client.post("/api/detect_frame", json={"image": b64_str, "focal_length": 650.0})
-    assert res_detect.status_code == 200
-    detect_json = res_detect.json()
-    assert detect_json["status"] == "success"
-    print(f"  -> POST /api/detect_frame status: 200 OK | Latency: {detect_json['inference_ms']}ms | FPS: {detect_json['fps']}")
+    app = SecondEyeDesktopApp(test_root, camera_source=0)
+    assert app.detector is not None
+    assert app.radar_widget is not None
+    app.on_close()
+    print("  -> Desktop GUI components initialized and terminated cleanly: OK")
 
     # 6. Test OCR Document & Text Reader
     print("\n[Test 6/6] Verifying OCR Document & Label Reader...")
@@ -152,19 +141,16 @@ def run_tests():
     print(f"  -> OCR Extracted: \"{ocr_res.full_text}\" (Word count: {ocr_res.word_count})")
     assert ocr_res.word_count >= 2, "Expected at least 2 words recognized from test document image"
 
-    # Test /api/ocr/read_frame endpoint
-    _, doc_buf = cv2.imencode('.jpg', doc_frame)
-    doc_b64 = "data:image/jpeg;base64," + base64.b64encode(doc_buf).decode('utf-8')
-    res_ocr = client.post("/api/ocr/read_frame", json={"image": doc_b64, "synthesize_audio": True})
-    assert res_ocr.status_code == 200
-    ocr_json = res_ocr.json()
-    assert ocr_json["status"] == "success"
-    assert "audio_paragraphs" in ocr_json
-    print(f"  -> POST /api/ocr/read_frame status: 200 OK | Audio Synthesized: {bool(ocr_json['full_audio_base64'])}")
+    # Test Offline Local Audio Speech
+    from src.services.audio_service import audio_service
+    audio_ok = audio_service.speak_local("Kiểm tra trợ lý thị giác", interrupt=True)
+    assert audio_ok is True
+    audio_service.stop_speech()
+    print("  -> 100% Offline Local Speech (macOS Linh) verified: OK")
 
     alert_mgr.stop()
     print("\n" + "=" * 60)
-    print("  ALL 6 SYSTEM & OCR TESTS PASSED PERFECTLY! 100% SUCCESS")
+    print("  ALL 6 SYSTEM, DESKTOP & OCR TESTS PASSED PERFECTLY! 100% SUCCESS")
     print("=" * 60)
 
 if __name__ == "__main__":

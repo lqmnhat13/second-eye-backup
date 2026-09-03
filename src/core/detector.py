@@ -81,7 +81,7 @@ class IndoorDetector:
             else:
                 self.enabled_classes.discard(class_key)
 
-    def detect(self, frame: np.ndarray) -> List[DetectedObject]:
+    def detect(self, frame: np.ndarray, imgsz: int = 480) -> List[DetectedObject]:
         """
         Run object detection on an input BGR frame.
         Returns sorted list of DetectedObject (highest risk / closest distance first).
@@ -91,9 +91,10 @@ class IndoorDetector:
 
         frame_h, frame_w = frame.shape[:2]
         
-        # Inference with YOLO
+        # Inference with YOLO (imgsz=480 for fast real-time inference)
         results: Any = self.model.predict(
             source=frame,
+            imgsz=imgsz,
             conf=self.conf_threshold,
             iou=self.iou_threshold,
             device=self.device,
@@ -155,75 +156,112 @@ class IndoorDetector:
 
     def draw_hud(self, frame: np.ndarray, detected_objects: List[DetectedObject], fps: float = 0.0) -> np.ndarray:
         """
-        Render a high-tech HUD overlay on the OpenCV frame.
-        Includes color-coded bounding boxes, distance badges, directional zones, and status bar.
+        Render a clean, modern, high-contrast AR HUD overlay on the video frame.
+        Guarantees clear text legibility regardless of background lighting or subject position.
         """
         annotated = frame.copy()
         h, w = annotated.shape[:2]
 
-        # Draw subtle vertical zone guideline dividers
+        # 1. Subtle vertical zone guideline dividers
         z_left = int(w * 0.35)
         z_right = int(w * 0.65)
-        cv2.line(annotated, (z_left, 0), (z_left, h), (70, 70, 70), 1, cv2.LINE_AA)
-        cv2.line(annotated, (z_right, 0), (z_right, h), (70, 70, 70), 1, cv2.LINE_AA)
+        cv2.line(annotated, (z_left, 36), (z_left, h - 26), (80, 80, 90), 1, cv2.LINE_AA)
+        cv2.line(annotated, (z_right, 36), (z_right, h - 26), (80, 80, 90), 1, cv2.LINE_AA)
 
-        # Zone labels at bottom
-        cv2.putText(annotated, "TRAI (LEFT)", (15, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 160), 1, cv2.LINE_AA)
-        cv2.putText(annotated, "PHIA TRUOC (CENTER)", (z_left + 15, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 255), 1, cv2.LINE_AA)
-        cv2.putText(annotated, "PHAI (RIGHT)", (z_right + 15, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 160), 1, cv2.LINE_AA)
-
-        # Render each detected object
+        # 2. Render each detected object with sleek corner brackets & high-contrast pill
         for obj in detected_objects:
             x1, y1, x2, y2 = obj.bbox
-            
+
             # Select color based on risk level
             if obj.risk_level == "DANGER":
-                color = COLOR_DANGER
-                line_thickness = 3
+                color = (40, 40, 240)      # Bright Red (BGR)
+                bg_color = (25, 25, 200)
+                badge_text_color = (255, 255, 255)
             elif obj.risk_level == "WARNING":
-                color = COLOR_WARNING
-                line_thickness = 2
+                color = (0, 165, 255)      # Bright Amber/Orange (BGR)
+                bg_color = (0, 140, 230)
+                badge_text_color = (0, 0, 0)
             else:
-                color = COLOR_SAFE
-                line_thickness = 2
+                color = (50, 205, 50)      # Bright Lime/Green (BGR)
+                bg_color = (40, 160, 40)
+                badge_text_color = (255, 255, 255)
 
-            # Bounding box with corner accents
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, line_thickness)
-            corner_len = min(20, (x2 - x1) // 4, (y2 - y1) // 4)
-            if corner_len > 3:
-                # Top-left corner
-                cv2.line(annotated, (x1, y1), (x1 + corner_len, y1), color, line_thickness + 2)
-                cv2.line(annotated, (x1, y1), (x1, y1 + corner_len), color, line_thickness + 2)
-                # Bottom-right corner
-                cv2.line(annotated, (x2, y2), (x2 - corner_len, y2), color, line_thickness + 2)
-                cv2.line(annotated, (x2, y2), (x2, y2 - corner_len), color, line_thickness + 2)
+            # Main bounding box outline (crisp 2px)
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
 
-            # Label text (clean ASCII for OpenCV renderer)
+            # High-tech corner accents (3px thick, 22px length)
+            corner_len = min(22, max(6, (x2 - x1) // 4), max(6, (y2 - y1) // 4))
+            if corner_len > 5:
+                # Top-Left
+                cv2.line(annotated, (x1, y1), (x1 + corner_len, y1), color, 3)
+                cv2.line(annotated, (x1, y1), (x1, y1 + corner_len), color, 3)
+                # Top-Right
+                cv2.line(annotated, (x2, y1), (x2 - corner_len, y1), color, 3)
+                cv2.line(annotated, (x2, y1), (x2, y1 + corner_len), color, 3)
+                # Bottom-Left
+                cv2.line(annotated, (x1, y2), (x1 + corner_len, y2), color, 3)
+                cv2.line(annotated, (x1, y2), (x1, y2 - corner_len), color, 3)
+                # Bottom-Right
+                cv2.line(annotated, (x2, y2), (x2 - corner_len, y2), color, 3)
+                cv2.line(annotated, (x2, y2), (x2, y2 - corner_len), color, 3)
+
+            # High-visibility Pill Label
             clean_name = remove_accents_vi(obj.name_vi).upper()
             clean_dir = remove_accents_vi(obj.direction_vi)
-            label = f"{clean_name} | {obj.distance:.1f}m ({clean_dir})"
-            
-            # Label background header
-            (lbl_w, lbl_h), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
-            bg_y1 = max(0, y1 - lbl_h - 10)
-            bg_y2 = y1
-            cv2.rectangle(annotated, (x1, bg_y1), (x1 + lbl_w + 12, bg_y2), color, -1)
-            
-            # Text color (white or black for contrast)
-            text_color = (255, 255, 255) if obj.risk_level != "WARNING" else (0, 0, 0)
-            cv2.putText(annotated, label, (x1 + 6, bg_y2 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.55, text_color, 1, cv2.LINE_AA)
+            label = f" {clean_name}  {obj.distance:.1f}m ({clean_dir}) "
 
-        # Header status overlay (Top bar)
+            font_scale = 0.52
+            font_thick = 1
+            (lbl_w, lbl_h), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thick)
+
+            # Position label: place inside box if box is near top edge, otherwise place above box
+            pad = 6
+            if y1 < 42:
+                pill_y1 = y1 + 4
+                pill_y2 = pill_y1 + lbl_h + pad * 2
+            else:
+                pill_y2 = y1 - 2
+                pill_y1 = pill_y2 - lbl_h - pad * 2
+
+            pill_x1 = max(4, x1)
+            pill_x2 = min(w - 4, pill_x1 + lbl_w + pad * 2)
+
+            # Draw solid pill badge with dark border
+            cv2.rectangle(annotated, (pill_x1, pill_y1), (pill_x2, pill_y2), (15, 15, 20), -1)
+            cv2.rectangle(annotated, (pill_x1, pill_y1), (pill_x2, pill_y2), color, 2)
+            cv2.putText(
+                annotated,
+                label,
+                (pill_x1 + pad, pill_y2 - pad - 1),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                (255, 255, 255),
+                font_thick,
+                cv2.LINE_AA
+            )
+
+        # 3. Clean translucent Top Status Bar
         overlay = annotated.copy()
-        cv2.rectangle(overlay, (0, 0), (w, 40), (20, 20, 24), -1)
-        cv2.addWeighted(overlay, 0.75, annotated, 0.25, 0, annotated)
+        cv2.rectangle(overlay, (0, 0), (w, 34), (12, 16, 26), -1)
+        # Bottom Zone Indicator Bar
+        cv2.rectangle(overlay, (0, h - 26), (w, h), (12, 16, 26), -1)
+        cv2.addWeighted(overlay, 0.85, annotated, 0.15, 0, annotated)
 
-        # Top bar info
+        # Top Bar Info
         danger_count = sum(1 for o in detected_objects if o.risk_level == "DANGER")
-        status_text = f"SECOND EYE AI | FPS: {fps:.1f} | Objects: {len(detected_objects)}"
-        cv2.putText(annotated, status_text, (15, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
+        status_text = f"SECOND EYE AI  |  FPS: {fps:.1f}  |  Vat the: {len(detected_objects)}"
+        cv2.putText(annotated, status_text, (14, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (220, 230, 245), 1, cv2.LINE_AA)
 
         if danger_count > 0:
-            cv2.putText(annotated, f"CANH BAO: {danger_count} VAT CAN NGUY HIEM!", (w - 320, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2, cv2.LINE_AA)
+            # Sleek red badge on top right
+            d_msg = f" NGUY HIEM: {danger_count} "
+            (dw, dh), _ = cv2.getTextSize(d_msg, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)
+            cv2.rectangle(annotated, (w - dw - 24, 6), (w - 12, 28), (40, 40, 230), -1)
+            cv2.putText(annotated, d_msg, (w - dw - 22, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
+
+        # Bottom Bar Zone Labels
+        cv2.putText(annotated, "<- BEN TRAI", (20, h - 9), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (160, 175, 195), 1, cv2.LINE_AA)
+        cv2.putText(annotated, "[ PHIA TRUOC (CENTER) ]", (z_left + int((z_right - z_left) * 0.15), h - 9), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 255), 1, cv2.LINE_AA)
+        cv2.putText(annotated, "BEN PHAI ->", (w - 115, h - 9), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (160, 175, 195), 1, cv2.LINE_AA)
 
         return annotated
