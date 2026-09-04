@@ -190,8 +190,9 @@ class InferenceWorker:
         self.detector = detector
         self.alert_manager = alert_manager
         self.running = True
-        self.frame_to_process = None
+        self.frame_to_process: Optional[np.ndarray] = None
         self.latest_detections: List[DetectedObject] = []
+        self.last_detection_time: float = time.time()
         self.lock = threading.Lock()
         self.has_new_frame = threading.Event()
         self.thread = threading.Thread(target=self._worker_loop, daemon=True)
@@ -199,33 +200,47 @@ class InferenceWorker:
 
     def submit_frame(self, frame: np.ndarray):
         with self.lock:
-            self.frame_to_process = frame
+            # Independent copy to eliminate frame buffer race conditions
+            self.frame_to_process = frame.copy()
         self.has_new_frame.set()
 
     def get_latest_detections(self) -> List[DetectedObject]:
         with self.lock:
-            return self.latest_detections
+            # If no inference has completed within 0.8s, discard stale detections
+            # to guarantee bounding boxes and radar never freeze on screen
+            if time.time() - self.last_detection_time > 0.8:
+                return []
+            return list(self.latest_detections)
 
     def _worker_loop(self):
         while self.running:
-            self.has_new_frame.wait(timeout=0.05)
-            self.has_new_frame.clear()
+            got_signal = self.has_new_frame.wait(timeout=0.05)
             if not self.running:
                 break
+            if not got_signal:
+                continue
+
+            self.has_new_frame.clear()
             with self.lock:
                 frame = self.frame_to_process
+                self.frame_to_process = None
+
             if frame is None:
                 continue
 
             try:
-                # Fast inference with imgsz=480
+                # Fast inference with imgsz=480 (~18-25ms on Apple Silicon MPS)
                 detections = self.detector.detect(frame, imgsz=480)
                 with self.lock:
                     self.latest_detections = detections
-                # Audio debouncing & queuing
+                    self.last_detection_time = time.time()
+
+                # Fast offline alert processing & sound debouncing
                 self.alert_manager.process_detections(detections)
-            except Exception:
-                pass
+            except Exception as e:
+                import traceback
+                print(f"[InferenceWorker] Detection error: {e}")
+                traceback.print_exc()
 
     def stop(self):
         self.running = False

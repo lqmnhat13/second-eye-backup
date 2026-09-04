@@ -151,9 +151,7 @@ class AlertManager:
         if not phrase:
             return []
 
-        # Get native Vietnamese MP3 base64
-        audio_b64 = audio_service.get_audio_base64(phrase)
-
+        # Fast local offline alert message (0ms latency, no online TTS blocking)
         priority = 1 if top_obj.risk_level == "DANGER" else 2
         now = time.time()
 
@@ -165,10 +163,10 @@ class AlertManager:
             direction_vi=top_obj.direction_vi,
             priority=priority,
             timestamp=now,
-            audio_base64=audio_b64
+            audio_base64=None
         )
 
-        # Enqueue for local offline speech synthesis
+        # Enqueue for local offline speech synthesis (macOS say -v Linh)
         if self.enable_local_audio and not self.is_muted:
             self.alert_queue.put((priority, now, alert_msg))
 
@@ -180,7 +178,7 @@ class AlertManager:
             "distance": round(top_obj.distance, 2),
             "direction_vi": top_obj.direction_vi,
             "timestamp": round(now, 2),
-            "audio_base64": audio_b64
+            "audio_base64": None
         }
 
         self.alert_log.insert(0, alert_dict)

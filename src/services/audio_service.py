@@ -14,7 +14,6 @@ import threading
 import subprocess
 from pathlib import Path
 from typing import Dict, Optional, List, Callable
-from gtts import gTTS
 
 from src.config import DATA_DIR
 
@@ -182,11 +181,12 @@ class VietnameseAudioService:
         self.is_speaking_document = False
 
     # ------------------------------------------------------------------
-    # 2. CACHED MP3 / DATA URL GENERATION (Web & API compatibility)
+    # 2. CACHED MP3 / DATA URL GENERATION (100% Offline)
     # ------------------------------------------------------------------
     def get_audio_base64(self, text_vi: str) -> Optional[str]:
         """
-        Generate or retrieve cached native Vietnamese audio (MP3 Base64 Data URL).
+        Retrieve cached native Vietnamese audio (MP3 Base64 Data URL) if available.
+        100% offline - never makes blocking network requests.
         """
         if not text_vi or not text_vi.strip():
             return None
@@ -210,24 +210,7 @@ class VietnameseAudioService:
             except Exception as e:
                 print(f"[AudioService] Error reading disk cache: {e}")
 
-        # Synthesize with gTTS in pure Vietnamese ('vi')
-        try:
-            tts = gTTS(text=clean_text, lang="vi", slow=False)
-            mp3_fp = io.BytesIO()
-            tts.write_to_fp(mp3_fp)
-            mp3_bytes = mp3_fp.getvalue()
-
-            # Save to disk cache
-            with open(disk_path, "wb") as f:
-                f.write(mp3_bytes)
-
-            b64 = base64.b64encode(mp3_bytes).decode("utf-8")
-            data_uri = f"data:audio/mp3;base64,{b64}"
-            self.memory_cache[text_hash] = data_uri
-            return data_uri
-        except Exception as e:
-            print(f"[AudioService] gTTS generation error: {e}")
-            return None
+        return None
 
     def synthesize_document_paragraphs(self, paragraphs: list) -> list:
         """

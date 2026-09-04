@@ -82,15 +82,14 @@ class DetectedObject:
 class DistanceEstimator:
     def __init__(
         self,
-        focal_length: float = DEFAULT_FOCAL_LENGTH,
+        focal_length: Optional[float] = None,
         camera_height: float = DEFAULT_CAMERA_HEIGHT
     ):
         """
         Initialize Enhanced Distance Estimator.
-        :param focal_length: Camera focal length in pixels (default: 500.0 for 70° FOV)
+        :param focal_length: Camera focal length in pixels (default: loaded from config or 500.0)
         :param camera_height: Camera height above ground in meters (default: 1.0m)
         """
-        self.focal_length = focal_length
         self.camera_height = camera_height
         self.tilt_angle_deg = 5.0 # Slight downward tilt angle in degrees
 
@@ -99,8 +98,13 @@ class DistanceEstimator:
         self.tracks: Dict[str, dict] = {}
         self._track_counter = 0
 
-        # Load persisted calibration if present
+        # Load persisted calibration if present, else default
+        self.focal_length = DEFAULT_FOCAL_LENGTH
         self.load_calibration()
+
+        # If caller explicitly provided a focal_length, respect the explicit argument
+        if focal_length is not None:
+            self.focal_length = focal_length
 
     def load_calibration(self):
         """Load calibrated camera parameters from data/camera_config.json if available."""
