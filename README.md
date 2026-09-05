@@ -2,6 +2,8 @@
 
 **Second Eye** là hệ thống trợ lý thông minh đa năng dành cho người khiếm thị và người thị lực kém (Low Vision). Hệ thống tích hợp mô hình Deep Learning YOLOv8 nhận diện 15 lớp vật thể/vật cản, thuật toán ước lượng khoảng cách Pinhole Camera, radar 2D thời gian thực và công nghệ **OCR Đọc Văn Bản Tiếng Việt** giúp người khiếm thị đọc sách báo, nhãn thuốc, hóa đơn, bao bì thực phẩm hay biển báo bằng giọng nói chuẩn xác.
 
+> **Tình trạng AI:** Cấu hình có 15 nhóm nhưng trọng số mặc định hiện chỉ hỗ trợ 11 nhóm; thiếu cầu thang, cửa, quạt, thùng rác. Khoảng cách mặc định là ước lượng hình học, chưa được xác thực độ chính xác. Xem [rà soát và hướng dẫn thử metric depth](docs/AI_REVIEW.md).
+
 ---
 
 ## 🌟 2 Chế Độ Hoạt Động (Dual-Mode System)

@@ -5,6 +5,8 @@ combining object bounding boxes with metric distance estimation and HUD renderin
 """
 
 import os
+import time
+import warnings
 import cv2
 import numpy as np
 import torch
@@ -35,8 +37,9 @@ class IndoorDetector:
         model_name: Optional[str] = None,
         conf_threshold: float = 0.35,
         iou_threshold: float = 0.45,
-        focal_length: float = DEFAULT_FOCAL_LENGTH,
-        device: Optional[str] = None
+        focal_length: Optional[float] = None,
+        device: Optional[str] = None,
+        depth_backend=None
     ):
         """
         Initialize Indoor Detector.
@@ -68,6 +71,18 @@ class IndoorDetector:
         self.iou_threshold = iou_threshold
         self.distance_estimator = DistanceEstimator(focal_length=focal_length)
         self.enabled_classes = set(INDOOR_CLASSES.keys())
+        if depth_backend is None and os.environ.get("SECOND_EYE_DEPTH_MODEL"):
+            from src.core.metric_depth import MetricDepthBackend
+            depth_backend = MetricDepthBackend(os.environ["SECOND_EYE_DEPTH_MODEL"], self.device)
+        self.depth_backend = depth_backend
+        self.class_mapping = dict(COCO_TO_INDOOR_MAP)
+        for key, info in INDOOR_CLASSES.items():
+            for alias in [key, *info.coco_classes]:
+                self.class_mapping[str(alias).lower()] = key
+        self.supported_classes = {self.class_mapping.get(str(n).lower()) for n in self.model.names.values()} - {None}
+        missing = self.enabled_classes - self.supported_classes
+        if missing:
+            warnings.warn("Weights do not support indoor classes: " + ", ".join(sorted(missing)), stacklevel=2)
 
     def set_focal_length(self, f: float):
         """Update focal length for distance estimation and persist configuration."""
@@ -81,7 +96,7 @@ class IndoorDetector:
             else:
                 self.enabled_classes.discard(class_key)
 
-    def detect(self, frame: np.ndarray, imgsz: int = 480) -> List[DetectedObject]:
+    def detect(self, frame: np.ndarray, imgsz: int = 640) -> List[DetectedObject]:
         """
         Run object detection on an input BGR frame.
         Returns sorted list of DetectedObject (highest risk / closest distance first).
@@ -90,6 +105,8 @@ class IndoorDetector:
             return []
 
         frame_h, frame_w = frame.shape[:2]
+        timestamp = time.monotonic()
+        self.distance_estimator.begin_frame(timestamp)
         
         # Inference with YOLO (imgsz=480 for fast real-time inference)
         results: Any = self.model.predict(
@@ -112,13 +129,14 @@ class IndoorDetector:
         if boxes is None or len(boxes) == 0:
             return detected_objects
 
+        depth_map = self.depth_backend.predict(frame) if self.depth_backend is not None else None
         for box in boxes:
             cls_id = int(box.cls[0].item())
             raw_class_name = self.model.names.get(cls_id, "").lower()
             conf = float(box.conf[0].item())
 
             # Map to 15 indoor classes
-            mapped_key = COCO_TO_INDOOR_MAP.get(raw_class_name)
+            mapped_key = self.class_mapping.get(raw_class_name)
             if not mapped_key:
                 # Check if it directly matches an indoor class key
                 if raw_class_name in INDOOR_CLASSES:
@@ -144,7 +162,10 @@ class IndoorDetector:
                 class_key=mapped_key,
                 confidence=conf,
                 bbox=(x1, y1, x2, y2),
-                frame_shape=(frame_h, frame_w)
+                frame_shape=(frame_h, frame_w),
+                timestamp=timestamp,
+                metric_distance=(self.depth_backend.object_distance(depth_map, (x1, y1, x2, y2))
+                                 if depth_map is not None else None)
             )
             detected_objects.append(detected_obj)
 
@@ -208,7 +229,7 @@ class IndoorDetector:
             # High-visibility Pill Label
             clean_name = remove_accents_vi(obj.name_vi).upper()
             clean_dir = remove_accents_vi(obj.direction_vi)
-            label = f" {clean_name}  {obj.distance:.1f}m ({clean_dir}) "
+            label = f" {clean_name}  ~{obj.distance:.1f}m ({clean_dir}) "
 
             font_scale = 0.52
             font_thick = 1

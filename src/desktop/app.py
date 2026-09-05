@@ -230,7 +230,7 @@ class InferenceWorker:
 
             try:
                 # Fast inference with imgsz=480 (~18-25ms on Apple Silicon MPS)
-                detections = self.detector.detect(frame, imgsz=480)
+                detections = self.detector.detect(frame)
                 with self.lock:
                     self.latest_detections = detections
                     self.last_detection_time = time.time()
@@ -282,7 +282,7 @@ class SecondEyeDesktopApp:
         self.detector = IndoorDetector(
             model_name=DEFAULT_MODEL_PATH,
             conf_threshold=0.35,
-            focal_length=self.focal_length
+            focal_length=None
         )
         # Synchronize focal length with saved calibration if present
         self.focal_length = self.detector.distance_estimator.focal_length
@@ -964,7 +964,7 @@ class SecondEyeDesktopApp:
                 ar = bbox_h / max(1, target.bbox[2] - target.bbox[0])
                 real_h = 0.88 if ar < 1.9 else 1.65
 
-            new_f = self.detector.distance_estimator.calibrate_with_known_distance(1.0, bbox_h, real_h)
+            new_f = self.detector.distance_estimator.calibrate_with_known_distance(1.0, bbox_h, real_h, frame_height=self.last_frame.shape[0] if self.last_frame is not None else 480)
             if new_f:
                 diff = new_f - self.focal_length
                 self.adjust_focal_length(diff)

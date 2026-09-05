@@ -30,7 +30,7 @@ def main():
     parser.add_argument("--source", type=str, default="0", help="Camera index (0, 1) or path/URL to video stream")
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL_PATH, help="YOLO model path/name")
     parser.add_argument("--conf", type=float, default=0.35, help="Confidence threshold")
-    parser.add_argument("--focal", type=float, default=DEFAULT_FOCAL_LENGTH, help="Initial camera focal length")
+    parser.add_argument("--focal", type=float, default=None, help="Initial camera focal length")
     parser.add_argument("--no-audio", action="store_true", help="Disable local speech synthesis")
     args = parser.parse_args()
 
@@ -75,7 +75,7 @@ def main():
     prev_time = time.time()
     fps = 30.0
     is_muted = False
-    current_focal = args.focal
+    current_focal = detector.distance_estimator.focal_length
     outputs_dir = DATA_DIR / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
 

@@ -62,8 +62,13 @@ class DetectedObject:
     rel_y: float                     # Normalized vertical bottom [0.0 - 1.0]
     coord_3d: Tuple[float, float]    # (X_lateral, Z_depth) in meters
 
+    distance_method: str = "size_prior"
+    distance_reliability: str = "low"  # Qualitative; not a calibrated probability.
+
     def to_dict(self):
         return {
+            "distance_method": self.distance_method,
+            "distance_reliability": self.distance_reliability,
             "class_key": self.class_key,
             "name_vi": self.name_vi,
             "name_en": self.name_en,
@@ -97,6 +102,9 @@ class DistanceEstimator:
         # track_id -> {"class_key": str, "bbox": tuple, "smoothed_dist": float, "last_time": float}
         self.tracks: Dict[str, dict] = {}
         self._track_counter = 0
+        self._used_tracks = set()
+        self.reference_width = 640
+        self.reference_height = 480
 
         # Load persisted calibration if present, else default
         self.focal_length = DEFAULT_FOCAL_LENGTH
@@ -137,6 +145,9 @@ class DistanceEstimator:
 
     def update_focal_length(self, new_focal_length: float, save: bool = True):
         """Update focal length calibration value."""
+        if not math.isfinite(new_focal_length) or new_focal_length <= 0:
+            raise ValueError("Focal length must be finite and positive")
+        self.tracks.clear()
         self.focal_length = max(100.0, float(new_focal_length))
         if save:
             self.save_calibration()
@@ -145,14 +156,16 @@ class DistanceEstimator:
         self,
         known_distance_m: float,
         observed_bbox_h: int,
-        real_height_m: float
+        real_height_m: float,
+        frame_height: int = 480
     ) -> Optional[float]:
         """
         Auto-calibrate focal length from a known reference distance:
         focal_length = (known_distance * observed_bbox_height) / real_height
         """
-        if observed_bbox_h > 15 and real_height_m > 0:
-            self.focal_length = (known_distance_m * float(observed_bbox_h)) / float(real_height_m)
+        if all(math.isfinite(v) and v > 0 for v in (known_distance_m, observed_bbox_h, real_height_m, frame_height)) and observed_bbox_h > 15:
+            self.tracks.clear()
+            self.focal_length = (known_distance_m * float(observed_bbox_h)) / float(real_height_m) * self.reference_height / frame_height
             self.save_calibration()
             return self.focal_length
         return None
@@ -174,6 +187,8 @@ class DistanceEstimator:
         bbox_width = max(1, x2 - x1)
         frame_h, frame_w = frame_shape[:2]
 
+        fx = self.focal_length * frame_w / self.reference_width
+        fy = self.focal_length * frame_h / self.reference_height
         info = INDOOR_CLASSES.get(class_key)
         if not info:
             real_h = 1.0
@@ -204,19 +219,11 @@ class DistanceEstimator:
                     effective_w = 0.50
 
         # 2. Geometric Pinhole Distances
-        dist_h = (self.focal_length * effective_h) / float(bbox_height)
-        dist_w = (self.focal_length * effective_w) / float(bbox_width)
+        dist_h = (fy * effective_h) / float(bbox_height)
+        dist_w = (fx * effective_w) / float(bbox_width)
 
-        # 3. Ground-plane horizon projection
-        # If the object touches the floor and bottom edge is below optical horizon
-        c_y = frame_h / 2.0
+        # A bounding box does not establish floor contact or camera pose.
         dist_ground = None
-        if y2 > c_y + 15:
-            theta = math.radians(self.tilt_angle_deg)
-            phi = math.atan((y2 - c_y) / self.focal_length)
-            tan_total = math.tan(theta + phi)
-            if tan_total > 0.05:
-                dist_ground = self.camera_height / tan_total
 
         # 4. Adaptive Geometric Fusion
         if is_vertically_cropped and not is_horizontally_cropped:
@@ -256,11 +263,12 @@ class DistanceEstimator:
         Track objects across consecutive video frames and apply an
         Exponential Moving Average (EMA) with Outlier Rejection to eliminate jitter.
         """
+        self._prune_tracks(timestamp)
         best_id = None
         best_iou = 0.28
 
         for tid, track in list(self.tracks.items()):
-            if track["class_key"] == class_key:
+            if tid not in self._used_tracks and track["class_key"] == class_key:
                 iou = compute_bbox_iou(bbox, track["bbox"])
                 if iou > best_iou:
                     best_iou = iou
@@ -268,14 +276,10 @@ class DistanceEstimator:
 
         if best_id is not None:
             prev_dist = self.tracks[best_id]["smoothed_dist"]
-            # Outlier damping: if a single frame jumps by > 1.2m, limit the jump
-            delta = raw_distance - prev_dist
-            if abs(delta) > 1.2:
-                raw_distance = prev_dist + (1.2 if delta > 0 else -1.2)
-
-            # EMA Smoothing (alpha=0.38 provides crisp responsiveness with rock-solid stability)
-            alpha = 0.38
-            smoothed = alpha * raw_distance + (1.0 - alpha) * prev_dist
+            # React immediately to approaching hazards; smooth only recession.
+            smoothed = (raw_distance if raw_distance < prev_dist else
+                        0.38 * raw_distance + 0.62 * prev_dist)
+            self._used_tracks.add(best_id)
 
             self.tracks[best_id]["bbox"] = bbox
             self.tracks[best_id]["smoothed_dist"] = smoothed
@@ -285,6 +289,7 @@ class DistanceEstimator:
             # Register new tracked object
             self._track_counter += 1
             new_id = f"{class_key}_{self._track_counter}"
+            self._used_tracks.add(new_id)
             self.tracks[new_id] = {
                 "class_key": class_key,
                 "bbox": bbox,
@@ -294,6 +299,11 @@ class DistanceEstimator:
             # Clean up stale tracks older than 1.2 seconds
             self._prune_tracks(timestamp)
             return float(raw_distance)
+
+    def begin_frame(self, timestamp: float):
+        """Allow each previous track to match at most one detection per frame."""
+        self._used_tracks.clear()
+        self._prune_tracks(timestamp)
 
     def _prune_tracks(self, current_time: float):
         """Remove tracks that haven't been seen for > 1.2 seconds."""
@@ -358,7 +368,7 @@ class DistanceEstimator:
         x1, _, x2, _ = bbox
         center_x = (x1 + x2) / 2.0
         principal_x = frame_width / 2.0
-        lateral_x = ((center_x - principal_x) * distance) / self.focal_length
+        lateral_x = ((center_x - principal_x) * distance) / (self.focal_length * frame_width / self.reference_width)
         return lateral_x, distance
 
     def process_detection(
@@ -367,7 +377,8 @@ class DistanceEstimator:
         confidence: float,
         bbox: Tuple[int, int, int, int],
         frame_shape: Tuple[int, int],
-        timestamp: Optional[float] = None
+        timestamp: Optional[float] = None,
+        metric_distance: Optional[float] = None
     ) -> DetectedObject:
         """
         Assemble comprehensive DetectedObject with multi-feature distance,
@@ -382,15 +393,20 @@ class DistanceEstimator:
         raw_distance = self.estimate_distance(class_key, bbox, (frame_h, frame_w))
 
         # 2. Object-level temporal smoothing (removes frame-to-frame jitter)
-        now = timestamp if timestamp is not None else time.time()
+        if metric_distance is not None:
+            if not math.isfinite(metric_distance) or metric_distance <= 0:
+                raise ValueError("Metric depth must be finite and positive")
+            raw_distance = metric_distance
+        now = timestamp if timestamp is not None else time.monotonic()
         distance = self._smooth_distance(class_key, bbox, raw_distance, now)
 
         dir_vi, dir_en, rel_x = self.determine_direction(bbox, frame_w)
         rel_y = y2 / float(frame_h)
-        risk = self.determine_risk(distance, class_key, dir_en)
+        risk = self.determine_risk(min(distance, raw_distance), class_key, dir_en)
         coord_3d = self.compute_3d_coordinates(bbox, distance, frame_w, frame_h)
 
         return DetectedObject(
+            distance_method="metric_depth" if metric_distance is not None else "size_prior",
             class_key=class_key,
             name_vi=info.name_vi,
             name_en=info.name_en,
